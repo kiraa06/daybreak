@@ -85,7 +85,7 @@ under claude.ai → Settings → Connectors. Daybreak uses whatever is connected
 **1. Install the helper**
 
 ```bash
-git clone <this repo> daybreak && cd daybreak
+git clone https://github.com/kiraa06/daybreak.git && cd daybreak
 python3 -m venv .venv && .venv/bin/pip install -e .
 .venv/bin/daybreak install
 ```
