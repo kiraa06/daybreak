@@ -1,145 +1,228 @@
-# Daybreak
+<p align="center">
+  <img src="docs/screenshots/brief.jpg" alt="The Monday Brief: a Monet painting with the date and time running down either side, and the day's first priority underneath" width="100%">
+</p>
 
-A morning brief, meeting prep and proactive work assistant for **any Chromium browser** (Chrome, Edge, Brave, Arc,
-Dia, Vivaldi, Opera, Chromium), running on **your own Claude subscription**. No API key is needed, and there are no
-servers apart from the one on your computer.
+<h1 align="center">Daybreak</h1>
 
-- **The Morning Brief**: every weekday your new tab opens on a public-domain painting with *The Monday Brief* written
-  across it, followed by these sections:
-  - *Push your work forward*
-  - *Top to-dos*: each with a link to its source and an *Ask Daybreak* button
-  - *New updates*: one per workstream, with a status tag, the people involved and a source link
-  - *Your day*: the schedule plus *Prep me*
-  - *Looking ahead*: "what do you want to work on tomorrow?"; your answer feeds into the next brief
+<p align="center"><em>A quiet morning brief for your browser.</em></p>
 
-  The brief opens as its own tab the first time you use the browser that morning. ⌥⇧B opens it any time.
-- **Meeting prep and pop-ups**: notes are built from your email, tickets and docs before each meeting. A card with
-  **Ignore / Prep notes / Join** appears 5 minutes before the meeting and again when it starts.
-- **Proactive pop-ups**: when someone is waiting on you or something is blocked (at most 3 an hour, work hours only).
-- **Side-panel assistant** (⌥⇧D or the toolbar icon):
-  - asks about the current page, your work and your day
-  - drafts email replies (it never sends anything)
-  - builds reports, decks and recaps as HTML documents
-  - runs scheduled tasks ("every weekday at 5:30pm, recap what I shipped")
+<p align="center">
+  Runs on your own Claude subscription · Lives on your computer · Works in any Chromium browser · MIT
+</p>
+
+---
+
+Most workdays begin with a pile of unread things and a faint sense that something important is hiding in it.
+Daybreak begins them with a painting.
+
+Every weekday, a little before your day starts, it reads what happened while you were away: email, calendar,
+tickets, docs and Slack. Then it writes you one calm page and leaves it on your new tab. It tells you what matters
+today, who is waiting on you, which meeting deserves ten minutes of preparation, and what can safely wait until
+Thursday.
+
+Think of it as the colleague who gets in early, reads everything, and leaves a tidy note on your desk. This one never
+asks for credit.
+
+## What's on the page
+
+<img src="docs/screenshots/todos-and-updates.jpg" alt="Top to-dos with source links and Ask Daybreak buttons, followed by numbered workstream updates with status tags" width="100%">
+
+The brief opens with **Push your work forward**: the one or two moves that would make today count. It arrives with
+the ticket numbers, names and deadlines already filled in, so you don't have to go digging. Next to it sits a yellow
+starburst that says *Let's do it*. Press it and Daybreak starts on the work with you. We tried removing the sticker
+once. It felt wrong.
+
+**Top to-dos** are the loops you owe other people. Each one has a link back to where it came from, and a button that
+hands the job to the assistant.
+
+**New updates** tells you what moved in each thing you're working on since yesterday. Every item is numbered, carries a
+status tag (*Active*, *Awaiting reply*, *Needs you*), and shows who's involved.
+
+**Your day** lays out your meetings and points at the one worth preparing for.
+
+**Looking ahead** asks what you'd like to work on tomorrow. Tomorrow's brief remembers your answer.
+
+The brief opens as its own tab the first time you use your browser in the morning. You can bring it back any time
+with ⌥⇧B.
+
+## The rest of the day
+
+<img src="docs/screenshots/your-day-and-popup.jpg" alt="Your day: the schedule on the left, a short summary and a Prep me button on the right, and a meeting card in the corner" width="100%">
+
+Five minutes before a meeting, a small card slides into the corner of whatever page you're on, with **Ignore**,
+**Prep notes** and **Join**. The prep notes are written ahead of time from your email, tickets and docs. They cover
+what the meeting is really about, what's likely to come up, and what you might want to ask.
+
+When someone is genuinely waiting on you, Daybreak may tap you on the shoulder. Gently. At most three times an hour,
+and never in the evening.
+
+<img src="docs/screenshots/side-panel.jpg" alt="The side panel assistant answering 'What should I focus on today?'" width="300" align="right">
+
+Open the side panel (⌥⇧D) and you have an assistant that already knows your week. You can:
+
+- ask about the page you're reading, or about the project behind it
+- have it draft the reply you've been putting off (it writes the draft and never sends it)
+- turn a messy thread into a one-pager, a deck or a recap
+- set up recurring jobs like *"every weekday at 5:30, recap what I shipped"*
+
+<br clear="right">
+
+## What Daybreak will never do
+
+- **Send, post or change anything.** Background work is read-only. Chat can write email drafts, and that's where it
+  stops.
+- **Ping you after hours.** Pop-ups respect your work hours and a rate limit.
+- **Ask for an API key.** It uses the Claude subscription you already have, through the Claude Agent SDK.
+- **Phone home.** Everything lives in one folder on your computer. The only outside calls go to your Claude account,
+  the tools you've connected, and a museum (for the painting).
+
+## Getting started
+
+You'll need [Claude Code](https://docs.claude.com/en/docs/claude-code) signed in with a Claude subscription (`claude`,
+then `/login`), and Python 3.11 or newer. For a good brief, connect Gmail, Google Calendar, Google Drive and Atlassian
+under claude.ai → Settings → Connectors. Daybreak uses whatever is connected and skips the rest.
+
+**1. Install the helper**
+
+```bash
+git clone <this repo> daybreak && cd daybreak
+python3 -m venv .venv && .venv/bin/pip install -e .
+.venv/bin/daybreak install
+```
+
+`install` does four things:
+
+- copies Daybreak into its own environment in your data folder
+- copies the extension there too
+- registers it with every Chromium browser it finds (Chrome, Edge, Brave, Arc, Dia, Vivaldi, Opera, Chromium)
+- starts the helper at login: a launchd agent on macOS, a systemd user service on Linux
+
+**2. Load the extension.** Open `chrome://extensions` (or `edge://`, `brave://`), turn on *Developer mode*, choose
+*Load unpacked*, and pick the folder `install` printed. Keep the new-tab page when the browser asks.
+
+**3. That's it.** If it's a weekday, your first brief shows up within a few minutes; otherwise it arrives on the next
+weekday morning. You can also run `.venv/bin/daybreak brief` and open a new tab.
+
+If the extension says it can't find the helper, run `daybreak pair` and paste the output into the extension's
+settings page.
 
 ## How it works
 
 ```
-Gmail · Google Calendar · Drive · Jira/Confluence   ← your claude.ai connectors (read-only)
-Slack                                               ← the Slack web session already signed in to your browser
-Bitbucket (optional)                                ← API token
+Gmail · Calendar · Drive · Jira/Confluence   ← your claude.ai connectors, read-only
+Slack                                        ← the Slack session already signed in to your browser
+Bitbucket (optional)                         ← an API token
         │
         ▼
- sensors ─► typed events (request · commitment · decision · blocker · context)
-        ─► router ─► workstreams ─► synthesis (overview, timeline, open loops) ─► curator (today's surface)
-        ─► Morning Brief · meeting prep · pop-ups · chat context
+ sensors ─► small typed events (request · commitment · decision · blocker · context)
+        ─► router ─► workstreams ─► synthesis (overview, timeline, open loops) ─► curator (what matters today)
+        ─► the brief · meeting prep · pop-ups · chat context
 ```
 
-Two parts:
+The **helper** is a small Python service.
 
-- **Helper** (`daybreak/`, Python ≥ 3.11): runs Claude through the
-  [Claude Agent SDK](https://docs.claude.com/en/docs/agent-sdk/overview) using your Claude Code login.
-  - Background runs load your claude.ai connectors with your hooks and plugins switched off.
-  - A permission gate lets only read-only connector tools run. Chat can also create Gmail drafts.
-  - Everything is stored in SQLite on your computer.
-- **Extension** (`extension/`, Manifest V3, no build step): provides the new-tab brief, side panel, pop-ups and the
-  Slack bridge.
-  - It pairs with the helper through a native-messaging host and talks to it on `127.0.0.1:47821` with a token.
-  - In browsers without a side panel (e.g. Arc, Opera), chat opens in a small window instead.
+- Every half hour during work hours, it asks Claude to read each source within a strict budget of tool calls.
+- Each finding is labelled as a request, a commitment, a decision, a blocker or a bit of context.
+- Findings are grouped into **workstreams**: the actual efforts you're juggling, like a migration, a launch or an
+  incident.
+- Each workstream keeps a short, honest summary that never claims more than the sources say.
+- Connector tools run behind a permission gate that allows reading and nothing else.
 
-### Slack without installing an app
+The **extension** is plain Manifest V3 with no build step. It draws the new-tab brief, the side panel and the pop-ups.
+It finds the helper through a native-messaging host, then talks to it on `127.0.0.1` with a token. In browsers without
+a side panel (Arc, Opera), chat opens in a small window instead.
 
-Many workspaces don't allow installing apps, so by default Daybreak reads Slack through the session you're already
-signed in with:
+## Slack, without installing an app
 
-1. It reads the Slack web client's `localConfig_v2` (your workspace token) from `app.slack.com`. If no Slack tab has
-   it yet, `app.slack.com/client/` is opened once in a background tab so Slack writes it.
-2. It calls read-only Web API methods with that token and your session cookie, the same calls the Slack web client
-   makes: `activity.feed`, `client.counts`, `search.modules.messages` and `conversations.history`/`replies`, plus
-   Slack's edge cache for names.
+Plenty of workspaces don't let you install Slack apps, so by default Daybreak reads Slack through the session you're
+already signed in with:
 
-The token never leaves the browser. These are Slack's internal web-client APIs, so they can change, and they act with
-your full Slack permissions, so follow your workspace's policies. If your workspace allows it, you can switch to the
-claude.ai Slack connector in the extension's options instead.
+1. It looks up the Slack web client's workspace token in `app.slack.com`'s local storage (`localConfig_v2`). If that
+   isn't there yet, it opens Slack once in a background tab and lets Slack write it.
+2. It makes the same read-only calls the Slack web client makes: `activity.feed`, `client.counts`,
+   `search.modules.messages` and `conversations.history`/`replies`, plus Slack's edge cache for names.
 
-## Setup
+The token stays in your browser, and only the conversations it reads reach the helper on your computer. Two honest
+caveats:
 
-**Requirements:** Claude Code signed in with a Claude subscription (`claude` → `/login`). For the brief to be useful,
-connect Gmail, Google Calendar, Google Drive and Atlassian in claude.ai → Settings → Connectors.
+- These are Slack's internal web APIs, so Slack can change them.
+- They act with your own Slack permissions, so follow your workspace's rules.
 
-1. **Install the helper**
-   ```bash
-   git clone <this repo> daybreak && cd daybreak
-   python3 -m venv .venv && .venv/bin/pip install -e .
-   .venv/bin/daybreak install
-   ```
-   `install` does four things:
-   - copies Daybreak into its own environment in the data folder
-   - copies the extension there too
-   - registers the native-messaging host in every Chromium browser it finds
-   - starts the helper at login: a launchd agent on macOS, a systemd user service on Linux
-
-   The login service runs from the data folder rather than your checkout. That matters on macOS, where background
-   processes can't read ~/Documents or ~/Desktop.
-
-   On Windows, the native host is registered, but you start `daybreak run` yourself or add a Task Scheduler task. To run
-   the helper in the foreground instead of installing it, use `.venv/bin/daybreak run`.
-2. **Load the extension**: open `chrome://extensions` (or `edge://`, `brave://`), turn on *Developer mode*, choose
-   *Load unpacked*, then pick the `extension` folder that `install` printed (inside the data folder). Keep the new-tab
-   change when the browser asks.
-   After pulling new code, run `daybreak install` again and click reload on the extension.
-3. **Slack**: stay signed in to your Slack workspace in that browser profile.
-
-If pairing doesn't happen automatically, run `daybreak pair` and paste its output into the extension's options page.
-
-Settings are in `config.toml` in the data folder:
-- macOS: `~/Library/Application Support/Daybreak`
-- Linux: `~/.local/share/daybreak`
-- Windows: `%LOCALAPPDATA%\Daybreak`
-
-They cover brief time, work hours, pop-ups, sources and models. A few can also be changed from the extension's options
-page.
-
-### Running in the background without keychain access
-
-`daybreak run` normally uses your Claude Code login from the system keychain. If you run it somewhere without that
-(SSH, containers, some service managers), create a long-lived token with `claude setup-token` and put
-`CLAUDE_CODE_OAUTH_TOKEN=…` in a `.env` file in the data folder before `daybreak install`. Treat that token like a
-password.
+If your workspace allows it, you can switch to the claude.ai Slack connector in the extension's settings.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
 | `daybreak run` | run the helper in the foreground |
-| `daybreak sense [--hours N]` | read sources and update workstreams now |
 | `daybreak brief` | write today's brief now |
+| `daybreak sense [--hours N]` | read your sources and update workstreams now |
 | `daybreak calendar` | refresh meetings |
-| `daybreak prep [meeting-id\|next]` | build prep notes |
-| `daybreak status` | show the helper's current state |
-| `daybreak pair` | print the pairing blob for the options page |
-| `daybreak install` / `uninstall` | register or remove the native host and the login service |
+| `daybreak prep [meeting-id\|next]` | write prep notes for a meeting |
+| `daybreak status` | show what the helper is up to |
+| `daybreak pair` | print pairing details for the extension's settings page |
+| `daybreak install` / `uninstall` | set up or remove the login service and browser registration |
 
-## Development
+Settings live in `config.toml` in the data folder. You can change the brief time, work hours, pop-up timing, sources
+and models there. The data folder is:
 
-- `daybreak install --editable` points the login service and native host straight at your checkout. Load the
-  extension from `extension/` in the repo instead of the data folder.
-- `DAYBREAK_DEV=1 daybreak run` serves the extension pages at `http://127.0.0.1:47821/dev/newtab.html` with a stub
-  `chrome` API, so you can work on the UI without reloading the extension.
-- `python tests/e2e_extension.py` loads the real extension into a throwaway Playwright Chromium profile. It checks
-  pairing, the brief, a meeting pop-up on a web page and the side panel. The helper must be running.
-- The extension's fixed ID comes from the public key in `extension/manifest.json`. If you publish your own build with
-  a different ID, add it to `extra_extension_ids` in `config.toml` and run `daybreak install` again.
+- macOS: `~/Library/Application Support/Daybreak`
+- Linux: `~/.local/share/daybreak`
+- Windows: `%LOCALAPPDATA%\Daybreak`
+
+## Questions people ask
+
+**Why a painting?**
+Because the first thing you see in the morning should be nicer than an inbox. Each day brings a different painting
+from the Art Institute of Chicago's public-domain collection, credited in the corner. Sometimes it's Monet. Sometimes
+it's a cow. Both are good.
+
+**Does it cost anything?**
+Daybreak is free. It does use some of your Claude subscription's usage, mostly for the half-hourly background reads. If
+you'd like it to go easier, raise `sense_every_minutes` in the config.
+
+**Which browsers?**
+Any Chromium browser that loads unpacked extensions. It's tested in Chromium and set up for Chrome, Edge, Brave, Arc,
+Dia, Vivaldi and Opera.
+
+**Windows?**
+Mostly. The browser registration works, but you start `daybreak run` yourself, or with Task Scheduler. macOS and Linux
+get a proper login service.
+
+**What if Claude gets something wrong?**
+The prompts are strict about only saying what the sources say, and every item links back to where it came from. When
+it's unsure, it says less. Still, it's a summary, so check before you act on anything important.
+
+**Why "Daybreak"?**
+It's the quiet part of the day before the day starts. That's where this lives.
 
 ## Privacy
 
-- Your data stays on your computer, in the data folder.
-- Model calls go through your own Claude account.
-- Background runs are read-only, and nothing is ever sent on your behalf.
-- The brief's paintings come from the Art Institute of Chicago's public-domain (CC0) collection.
+Your data stays on your computer, in the data folder above. Model calls go through your own Claude account.
+Background runs are read-only, and nothing is ever sent on your behalf. You can delete the folder to make Daybreak
+forget everything.
 
-Inspired by the Morning Brief in Dia's Better Days plan. Not affiliated with The Browser Company, Anthropic or Slack.
+## Contributing
+
+Issues and pull requests are welcome, especially from people with workflows unlike ours.
+
+- `daybreak install --editable` runs the login service straight from your checkout.
+- `DAYBREAK_DEV=1 daybreak run` serves the extension pages at `http://127.0.0.1:47821/dev/newtab.html` with a stub
+  `chrome` API, so you can work on the UI without reloading anything.
+- `python tests/e2e_extension.py` loads the real extension into a throwaway Chromium profile and checks pairing, the
+  brief, a pop-up and the side panel.
+- `python docs/make_demo.py` regenerates the screenshots above from made-up data. Please keep real accounts out of
+  screenshots and issues.
+
+If you ship your own build of the extension under a different ID, add the ID to `extra_extension_ids` in
+`config.toml` and run `daybreak install` again.
+
+## Credits
+
+Inspired by the Morning Brief in Dia's Better Days plan, and built for people who wanted that feeling in the browser
+they already use. Paintings courtesy of the Art Institute of Chicago's open-access (CC0) collection. Not affiliated
+with The Browser Company, Anthropic or Slack.
 
 ## License
 
-MIT
+MIT. Be kind with it.

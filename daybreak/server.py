@@ -255,7 +255,8 @@ def make_app(app: App) -> web.Application:
     web_app.add_routes(routes)
 
     async def on_startup(_a):
-        app.start()
+        if not os.environ.get("DAYBREAK_NO_LOOPS"):  # demo renders and UI work don't need background loops
+            app.start()
 
     web_app.on_startup.append(on_startup)
     return web_app
