@@ -218,6 +218,7 @@ class App:
             "next_meeting": ({k: nxt[0][k] for k in ("id", "title", "time", "start", "join_url", "prep_url")} if nxt else None),
             "workstreams": self.db.one("SELECT COUNT(*) AS n FROM workstreams WHERE state IN ('active','waiting')")["n"],
             "slack_mode": self.cfg.slack, "slack_workspace": self.cfg.slack_workspace,
+            "slack_workspaces": self.db.get("slack_workspaces", []),
             "brief_time": datetime.now().replace(hour=self.cfg.brief_time[0], minute=self.cfg.brief_time[1]).strftime("%-I:%M %p"),
             "brief_error": self.db.get("brief_error"), "claude": self.claude.stats,
         }

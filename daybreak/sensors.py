@@ -131,14 +131,25 @@ class Sensors:
         if not self.bridge.extension_online():
             log.info("slack: extension offline; skipping")
             return -1
-        since = max(time.time() - hours * 3600, self.db.get("slack_cursor", 0) or 0)
-        result = await self.bridge.request("slack.fetch", {"workspace": self.cfg.slack_workspace, "oldest": since},
-                                           timeout=150)
+        now = time.time()
+        cursors = self.db.get("slack_cursors", {}) or {}
+        params = {"workspace": self.cfg.slack_workspace, "oldest": now - hours * 3600,
+                  "oldest_new": now - max(hours, 24) * 3600,  # a workspace seen for the first time looks back a day
+                  "oldest_by_workspace": {url: max(ts, now - hours * 3600) for url, ts in cursors.items()}}
+        result = await self.bridge.request("slack.fetch", params, timeout=150)
         if not result or result.get("error"):
             log.warning("slack bridge: %s", (result or {}).get("error", "timed out"))
+            if result and result.get("workspaces"):
+                self.db.put("slack_workspaces", result["workspaces"])
             return -1
         convos = result.get("conversations") or []
-        self.db.put("slack_cursor", time.time() - 600)
+        self.db.put("slack_workspaces", result.get("workspaces") or [])
+        for w in result.get("workspaces") or []:
+            if w.get("ok"):
+                cursors[w["url"]] = now - 600
+        self.db.put("slack_cursors", cursors)
+        log.info("slack: %s", ", ".join(f"{w['name']}: {w.get('conversations', 0)} convos {w.get('diag')}"
+                                        for w in result.get("workspaces") or []))
         if not convos:
             return 0
         payload = json.dumps(convos, ensure_ascii=False)[:60000]

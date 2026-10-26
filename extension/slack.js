@@ -1,11 +1,12 @@
 // Reads Slack through the Slack web session already signed in to this browser — no Slack app to install:
-//   1. session: `localConfig_v2` from app.slack.com's localStorage (team list + xoxc token), choosing the configured
-//      workspace or `lastActiveTeamId`. If no Slack tab has it yet, app.slack.com/client/ is loaded in a background tab
-//      so Slack's own client writes it (your `d` session cookie does the sign-in), then the tab is closed.
+//   1. sessions: `localConfig_v2` from app.slack.com's localStorage holds every workspace you're signed in to, each with
+//      its xoxc token. We use the workspaces named in settings, or all of them (up to four). If no Slack tab has it yet,
+//      app.slack.com/client/ is loaded in a background tab so Slack's own client writes it (your `d` session cookie does
+//      the sign-in), then the tab is closed.
 //   2. calls: multipart POSTs to https://<workspace>.slack.com/api/<method> with the token, like the web client —
 //      activity.feed (mentions inbox), client.counts (DMs with new messages), search.modules.messages (your own
 //      messages), conversations.history / conversations.replies, and edgeapi.slack.com/cache for names.
-// Read-only methods only. The token stays in this browser (session storage); only normalized conversations go to the
+// Read-only methods only. Tokens stay in this browser (session storage); only normalized conversations go to the
 // local helper.
 
 const READ_ONLY = new Set([
@@ -13,9 +14,11 @@ const READ_ONLY = new Set([
   "conversations.replies", "conversations.info", "search.modules.messages", "search.messages", "users.info",
 ]);
 const FEED_TYPES = "internal_channel_invite,at_user,at_user_group,at_channel,at_everyone,keyword,external_channel_invite,shared_workspace_invite,external_dm_invite";
+const AUTH_ERRORS = ["invalid_auth", "not_authed", "token_revoked", "account_inactive"];
+const MAX_WORKSPACES = 4;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// --- session ------------------------------------------------------------------
+// --- sessions -------------------------------------------------------------------
 
 async function readLocalConfig(tabId) {
   const [{ result } = {}] = await chrome.scripting.executeScript({
@@ -48,30 +51,34 @@ async function localConfig() {
   }
 }
 
-function pickTeam(cfg, workspace) {
-  const teams = Object.values(cfg.teams || {});
-  const want = (workspace || "").replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
-  return (want && teams.find((t) => (t.url || "").toLowerCase().includes(want) || `${t.domain}.slack.com` === want))
-    || cfg.teams[cfg.lastActiveTeamId] || teams[0];
+const host = (w) => String(w || "").trim().replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
+
+function wantedTeams(cfg, workspace) {
+  const all = Object.values(cfg.teams || {}).filter((t) => t.token);
+  const wants = String(workspace || "").split(",").map(host).filter(Boolean);
+  const picked = wants.length
+    ? all.filter((t) => wants.some((w) => host(t.url) === w || `${t.domain}.slack.com` === w || (t.name || "").toLowerCase() === w))
+    : all;
+  picked.sort((a, b) => (b.id === cfg.lastActiveTeamId) - (a.id === cfg.lastActiveTeamId));
+  return picked.slice(0, MAX_WORKSPACES);
 }
 
-async function session(workspace, { fresh = false } = {}) {
+const toSession = (team) => ({
+  token: team.token, url: (team.url || `https://${team.domain}.slack.com/`).replace(/\/$/, ""),
+  teamId: team.id, enterpriseId: team.enterprise_id || null, name: team.name || team.domain || "",
+});
+
+async function sessions(workspace, { fresh = false } = {}) {
+  const key = String(workspace || "");
   if (!fresh) {
-    const { slackSession } = await chrome.storage.session.get("slackSession");
-    if (slackSession && (!workspace || slackSession.url.includes(workspace.replace(/^https?:\/\//, "").replace(/\/.*$/, "")))) {
-      return slackSession;
-    }
+    const { slackSessions } = await chrome.storage.session.get("slackSessions");
+    if (slackSessions?.workspace === key && slackSessions.list?.length) return slackSessions.list;
   }
   const cfg = await localConfig();
-  if (!cfg) return null;
-  const team = pickTeam(cfg, workspace);
-  if (!team?.token) return null;
-  const s = {
-    token: team.token, url: (team.url || `https://${team.domain}.slack.com/`).replace(/\/$/, ""),
-    teamId: team.id, enterpriseId: team.enterprise_id || null, userId: team.user_id || null, name: team.name || "",
-  };
-  await chrome.storage.session.set({ slackSession: s });
-  return s;
+  if (!cfg) return [];
+  const list = wantedTeams(cfg, workspace).map(toSession);
+  await chrome.storage.session.set({ slackSessions: { workspace: key, list } });
+  return list;
 }
 
 // --- API ------------------------------------------------------------------------
@@ -138,22 +145,13 @@ function cleanText(text, users) {
     .slice(0, 700);
 }
 
-// --- fetch ------------------------------------------------------------------------
+// --- one workspace ---------------------------------------------------------------
 
-export async function slackFetch(params) {
-  let s = await session(params.workspace);
-  if (!s) return { error: "Slack session not found — sign in to Slack once in this browser profile (app.slack.com)." };
-  let api = client(s);
-  let auth = await api.call("auth.test");
-  if (!auth.ok && ["invalid_auth", "not_authed", "token_revoked", "account_inactive"].includes(auth.error)) {
-    s = await session(params.workspace, { fresh: true });  // token rotated: re-read localConfig_v2
-    if (!s) return { error: `Slack session expired (${auth.error}) — open Slack in this browser and sign in again.` };
-    api = client(s);
-    auth = await api.call("auth.test");
-  }
-  if (!auth.ok) return { error: `Slack auth failed: ${auth.error}` };
+async function fetchWorkspace(s, oldest) {
+  const api = client(s);
+  const auth = await api.call("auth.test");
+  if (!auth.ok) return { name: s.name, workspace: s.url, error: `auth.test: ${auth.error}`, authError: AUTH_ERRORS.includes(auth.error) };
   const me = auth.user_id;
-  const oldest = Number(params.oldest) || Date.now() / 1000 - 12 * 3600;
 
   // Conversations worth reading: keyed by channel + thread.
   const wanted = new Map();
@@ -173,6 +171,10 @@ export async function slackFetch(params) {
       sort_dir: "desc", extra_message_data: true, search_exclude_bots: true }, "search-messages").catch(() => null),
   ]);
 
+  const diag = { feed: feed?.ok ? (feed.items || []).length : feed?.error || "failed",
+                 counts: counts?.ok ? (counts.ims || []).length + (counts.mpims || []).length : counts?.error || "failed",
+                 mine: mine?.ok ? (mine.items || []).length : mine?.error || "failed" };
+
   // 1) Mentions / keywords from the activity inbox (fallback: activity.mentions).
   let feedItems = feed?.ok ? feed.items || [] : [];
   if (!feed?.ok) {
@@ -184,15 +186,12 @@ export async function slackFetch(params) {
     const msg = it.item?.message || it.message || {};
     const ts = Number(msg.ts || it.feed_ts || 0);
     if (ts < oldest) continue;
-    want(msg.channel || msg.channel_id, msg.thread_ts && msg.thread_ts !== msg.ts ? msg.thread_ts : msg.thread_ts || msg.ts,
-         it.item?.type || "mention");
+    want(msg.channel || msg.channel_id, msg.thread_ts || msg.ts, it.item?.type || "mention");
   }
 
   // 2) DMs and group DMs with new messages since the cursor.
   for (const im of [...(counts?.ims || []), ...(counts?.mpims || [])]) {
-    if (Number(im.latest || 0) >= oldest && (im.has_unreads || im.mention_count || Number(im.latest) >= oldest)) {
-      want(im.id, null, "dm");
-    }
+    if (Number(im.latest || 0) >= oldest) want(im.id, null, "dm");
   }
 
   // 3) Threads I wrote in (my commitments and replies).
@@ -233,13 +232,13 @@ export async function slackFetch(params) {
   const names = await resolveNames(api, userIds, channelIds);
 
   return {
-    me: auth.user,
-    workspace: s.url,
+    name: s.name, workspace: s.url, me: auth.user, diag, considered: wanted.size,
     conversations: convos.filter((c) => c.msgs.length).map((c) => {
       const isDm = c.channel.startsWith("D");
       const other = isDm ? names.users.get(c.msgs.find((m) => m.user !== me)?.user) : null;
       return {
-        ref: `slack:${c.channel}:${c.threadTs || "channel"}`,
+        ref: `slack:${s.teamId}:${c.channel}:${c.threadTs || "channel"}`,
+        workspace: s.name,
         channel: isDm ? `DM with ${other || "someone"}` : c.channel.startsWith("G") && !names.channels.has(c.channel)
           ? "group DM" : `#${names.channels.get(c.channel) || c.channel}`,
         why: [...c.reasons].join(", "),
@@ -250,5 +249,34 @@ export async function slackFetch(params) {
         })),
       };
     }),
+  };
+}
+
+// --- all workspaces ---------------------------------------------------------------
+
+export async function slackFetch(params) {
+  const fallback = Number(params.oldest) || Date.now() / 1000 - 12 * 3600;
+  // Each workspace has its own "read up to" point; a workspace seen for the first time looks back further.
+  const since = (s) => Number(params.oldest_by_workspace?.[s.url]) || Number(params.oldest_new) || fallback;
+  const run = async (list) => Promise.all(list.map((s) => fetchWorkspace(s, since(s))
+    .catch((e) => ({ name: s.name, workspace: s.url, error: String(e?.message || e) }))));
+
+  let list = await sessions(params.workspace);
+  if (!list.length) return { error: "Slack session not found — sign in to Slack once in this browser profile (app.slack.com)." };
+  let results = await run(list);
+  if (results.some((r) => r.authError)) {  // a token rotated: re-read localConfig_v2 once
+    list = await sessions(params.workspace, { fresh: true });
+    results = await run(list);
+  }
+  const ok = results.filter((r) => !r.error);
+  const workspaces = results.map((r) => ({ name: r.name, url: r.workspace, ok: !r.error, error: r.error || "",
+                                           conversations: (r.conversations || []).length, considered: r.considered || 0,
+                                           diag: r.diag || null }));
+  if (!ok.length) return { error: results.map((r) => `${r.name}: ${r.error}`).join("; "), workspaces };
+  return {
+    me: [...new Set(ok.map((r) => r.me))].join(", "),
+    workspace: ok.map((r) => r.workspace).join(", "),
+    workspaces,
+    conversations: ok.flatMap((r) => r.conversations),
   };
 }

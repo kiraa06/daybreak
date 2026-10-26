@@ -50,7 +50,7 @@ drive = true
 calendar = true             # claude.ai Google Calendar connector
 calendar_ics_url = ""       # optional private ICS feed; used instead of the connector when set
 slack = "browser"           # "browser" = your browser's Slack session via the extension, "connector", or "off"
-slack_workspace = ""        # e.g. "https://yourcompany.slack.com" (browser mode)
+slack_workspace = ""        # blank = every workspace you're signed in to; or "a.slack.com, b.slack.com" (browser mode)
 bitbucket_workspace = ""    # optional; token read from env BITBUCKET_API_TOKEN or keychain item "daybreak-bitbucket"
 bitbucket_email = ""
 

@@ -6,6 +6,17 @@ import { renderToast } from "./toast.js";
 const TICK = "daybreak-tick";
 let lastHello = 0;
 
+// `daybreak install` stamps build.json; when the stamp on disk changes, reload so the new code takes over.
+async function diskBuild() {
+  try {
+    return (await (await fetch(chrome.runtime.getURL("build.json"), { cache: "no-store" })).json()).build;
+  } catch {
+    return null;  // running from a checkout without a stamp
+  }
+}
+let loadedBuild = null;
+diskBuild().then((b) => (loadedBuild = b));
+
 async function setup() {
   chrome.alarms.create(TICK, { periodInMinutes: 0.5 });
   if (chrome.sidePanel?.setPanelBehavior) {
@@ -27,6 +38,8 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 });
 
 async function tick() {
+  const b = await diskBuild();
+  if (loadedBuild && b && b !== loadedBuild) return chrome.runtime.reload();
   try {
     if (Date.now() - lastHello > 4 * 60_000) {
       await post("/api/hello", { version: chrome.runtime.getManifest().version, sidePanel: !!chrome.sidePanel?.open });

@@ -16,6 +16,11 @@ async function refresh() {
         : k === "slack" ? "couldn't read — sign in to Slack in this browser profile" : "failed on the last run";
       return `<li><strong>${names[k] || k}</strong>: <span class="${v.ok ? "ok" : "bad"}">${esc(note)}</span></li>`;
     }).join("") || "<li>Not read yet.</li>";
+    const ws = st.slack_workspaces || [];
+    if (ws.length) {
+      $("sources").insertAdjacentHTML("beforeend", `<li><strong>Slack workspaces</strong>: ${ws.map((w) =>
+        `${esc(w.name)} <span class="${w.ok ? "ok" : "bad"}">${w.ok ? "✓" : "✕ " + esc(w.error)}</span>`).join(" · ")}</li>`);
+    }
     $("schedules").innerHTML = schedules.map((s) =>
       `<li><strong>${esc(s.name)}</strong> — ${esc(s.spec)} · next ${esc(s.next_run_text)} ${s.last_status ? "· " + esc(s.last_status) : ""}
        <button class="secondary" data-del="${esc(s.id)}" style="margin:0 0 0 8px;padding:3px 10px">Delete</button></li>`).join("") || "<li>None yet.</li>";

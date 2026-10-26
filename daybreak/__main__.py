@@ -9,6 +9,7 @@ import logging.handlers
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from . import config
@@ -70,6 +71,8 @@ def cmd_install(args) -> None:
     if (project / "extension").exists():
         shutil.rmtree(ext, ignore_errors=True)
         shutil.copytree(project / "extension", ext)
+        # The extension watches this stamp and reloads itself when an install changes it.
+        (ext / "build.json").write_text(json.dumps({"build": int(time.time())}))
     launcher = osutil.write_launcher(python, cwd=None if not args.editable else project)
     browsers = osutil.install_native_host(HOST_NAME, launcher, cfg.extension_origins)
     print("native messaging host registered for: " + (", ".join(browsers) or "no Chromium browsers found"))
