@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Daybreak</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <header class="bar">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M5 21a11 11 0 0 1 22 0z" fill="currentColor"/><rect x="3" y="23" width="26" height="2.2" rx="1.1" fill="currentColor"/></svg>
+      <span>Daybreak</span>
+    </div>
+    <div class="bar-actions">
+      <select id="history" title="Recent chats"><option value="">Recent chats</option></select>
+      <button id="new" title="New chat">＋</button>
+    </div>
+  </header>
+
+  <section id="log" class="log">
+    <div class="welcome" id="welcome">
+      <h1 id="hello">Good morning</h1>
+      <p>Ask about this page, your work, your day — or have me draft, prep and make things.</p>
+      <div class="chips" id="chips"></div>
+      <div class="next" id="next"></div>
+    </div>
+  </section>
+
+  <form id="form" class="composer">
+    <label class="ctx"><input type="checkbox" id="use-page" checked> <span id="page-label">Use this page</span></label>
+    <div class="box">
+      <textarea id="input" rows="1" placeholder="Ask Daybreak…" autofocus></textarea>
+      <button id="send" type="submit" title="Send">↑</button>
+    </div>
+  </form>
+  <script type="module" src="sidepanel.js"></script>
+</body>
+</html>

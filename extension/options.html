@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Daybreak settings</title>
+  <style>
+    :root { color-scheme: dark; --bg:#121212; --card:#1e1e1e; --ink:#f3efe6; --muted:#9d988e; --line:#2d2c2a; --accent:#f8e44c; }
+    body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.55 -apple-system, BlinkMacSystemFont, system-ui, sans-serif; }
+    main { max-width: 720px; margin: 0 auto; padding: 48px 24px 80px; }
+    h1 { font: italic 400 44px/1.1 "Iowan Old Style", Georgia, serif; color: var(--accent); margin: 0 0 8px; }
+    h2 { font: italic 400 24px/1.2 "Iowan Old Style", Georgia, serif; margin: 0 0 10px; }
+    .card { background: var(--card); border-radius: 16px; padding: 22px 24px; margin: 22px 0; }
+    label { display:block; margin: 12px 0 4px; color: var(--muted); font-size: 13px; }
+    input, select, textarea { width: 100%; box-sizing: border-box; background: #151413; color: var(--ink); border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; font: inherit; }
+    textarea { min-height: 70px; font: 13px "SF Mono", Menlo, monospace; }
+    button { background: var(--ink); color: #151413; border: 0; border-radius: 10px; padding: 9px 16px; font-weight: 600; cursor: pointer; margin-top: 14px; }
+    button.secondary { background: #2a2826; color: var(--ink); }
+    .muted { color: var(--muted); } .ok { color: #8fd19e; } .bad { color: #f0a58f; }
+    code { font: 13px "SF Mono", Menlo, monospace; background: #151413; padding: 1px 6px; border-radius: 6px; }
+    ul { padding-left: 20px; } li { margin: 4px 0; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Daybreak</h1>
+  <p class="muted">Your Morning Brief, meeting prep and pop-ups, running on your Claude subscription through the helper on this computer.</p>
+
+  <section class="card">
+    <h2>Connection</h2>
+    <p id="conn" class="muted">Checking…</p>
+    <div class="row">
+      <button id="repair">Pair with the helper</button>
+      <button id="sense" class="secondary">Refresh sources now</button>
+    </div>
+    <label for="manual">Can't pair automatically? Paste the output of <code>daybreak pair</code></label>
+    <textarea id="manual" placeholder='{"port": 47821, "token": "…"}'></textarea>
+    <button id="save-manual" class="secondary">Save pairing</button>
+  </section>
+
+  <section class="card">
+    <h2>You</h2>
+    <label for="name">Your name (blank = learned from your tools)</label>
+    <input id="name">
+    <label for="brief_time">Morning Brief ready by (24h)</label>
+    <input id="brief_time" placeholder="08:30">
+    <label for="slack">Slack</label>
+    <select id="slack">
+      <option value="browser">Through my Slack session in this browser (no app install)</option>
+      <option value="connector">Through the claude.ai Slack connector</option>
+      <option value="off">Off</option>
+    </select>
+    <label for="slack_workspace">Slack workspace URL (blank = the one you used last)</label>
+    <input id="slack_workspace" placeholder="https://yourcompany.slack.com">
+    <button id="save">Save</button> <span id="saved" class="muted"></span>
+  </section>
+
+  <section class="card">
+    <h2>Sources</h2>
+    <ul id="sources" class="muted"></ul>
+    <p class="muted">Gmail, Drive, Jira/Confluence, Google Calendar and Slack connectors are the ones connected to your Claude account
+      (claude.ai → Settings → Connectors). Daybreak only ever reads from them, except creating Gmail drafts when you ask in chat.</p>
+  </section>
+
+  <section class="card">
+    <h2>Scheduled tasks</h2>
+    <ul id="schedules" class="muted"></ul>
+    <p class="muted">Create them by asking in the side panel, e.g. “every weekday at 5:30pm, recap what I shipped today”.</p>
+  </section>
+</main>
+<script type="module" src="options.js"></script>
+</body>
+</html>

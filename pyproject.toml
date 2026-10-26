@@ -1,0 +1,21 @@
+[project]
+name = "daybreak"
+version = "0.1.0"
+description = "A morning brief, meeting prep and proactive work assistant for Chromium browsers, powered by your Claude subscription."
+requires-python = ">=3.11"
+dependencies = [
+    "claude-agent-sdk>=0.2",
+    "aiohttp>=3.9",
+    "icalendar>=5",
+    "recurring-ical-events>=2",
+]
+
+[project.scripts]
+daybreak = "daybreak.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["daybreak"]

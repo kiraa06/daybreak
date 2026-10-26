@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>New Tab</title>
+  <link rel="stylesheet" href="newtab.css">
+</head>
+<body>
+  <header class="top">
+    <button class="logo" id="logo" title="Ask Daybreak">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M5 21a11 11 0 0 1 22 0z" fill="currentColor"/><rect x="3" y="23" width="26" height="2.2" rx="1.1" fill="currentColor"/></svg>
+    </button>
+  </header>
+
+  <main id="brief" hidden>
+    <section class="hero">
+      <div class="side left"><span id="date"></span></div>
+      <figure class="painting">
+        <img id="painting" alt="">
+        <h1 class="title"><span class="the">The</span><span class="day" id="title-day">Monday Brief</span></h1>
+      </figure>
+      <div class="side right"><span id="clock"></span></div>
+    </section>
+    <div class="under">
+      <p class="caption" id="caption"></p>
+      <a class="credit" id="credit" target="_blank" rel="noreferrer"></a>
+    </div>
+
+    <section class="card push" id="push-card">
+      <div class="push-left">
+        <h2>Push your work forward</h2>
+        <button class="sticker" id="sticker"><span>Let's<br>do it →</span></button>
+      </div>
+      <div class="push-right" id="push"></div>
+    </section>
+
+    <section class="row" id="todo-row">
+      <div class="row-head"><h2>Top to-dos</h2><div class="meta" id="todo-progress"></div></div>
+      <div class="row-body"><ul class="todos" id="todos"></ul></div>
+    </section>
+
+    <section class="row" id="updates-row">
+      <div class="row-head"><h2>New updates</h2></div>
+      <div class="row-body"><ol class="updates" id="updates"></ol></div>
+    </section>
+
+    <section class="row" id="day-row">
+      <div class="row-head"><h2>Your day</h2></div>
+      <div class="row-body">
+        <div class="schedule-card">
+          <ol class="schedule" id="schedule"></ol>
+          <div class="schedule-right">
+            <p id="day-summary"></p>
+            <div class="day-foot">
+              <span class="facepile" id="day-people"></span>
+              <button class="prep-badge" id="prep-me" hidden><span class="star">✦</span> Prep me</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="row" id="ahead-row">
+      <div class="row-head"><h2>Looking ahead</h2></div>
+      <div class="row-body">
+        <p class="lead" id="ahead-intro"></p>
+        <p class="ask">What do you want to work on tomorrow?</p>
+        <ul class="options" id="ahead-options"></ul>
+        <input class="custom" id="ahead-custom" placeholder="Something else…">
+        <div class="saved" id="ahead-saved" hidden>✓ Saved. Daybreak will remember this tomorrow.</div>
+      </div>
+    </section>
+  </main>
+
+  <main id="empty" class="empty" hidden>
+    <div class="empty-inner">
+      <h1 id="empty-title">Good morning</h1>
+      <p id="empty-text"></p>
+      <div class="empty-actions" id="empty-actions"></div>
+    </div>
+  </main>
+
+  <footer class="foot">
+    <span id="status"></span>
+    <span class="foot-actions">
+      <button id="refresh" class="link">Refresh brief</button>
+      <button id="open-chat" class="link">Ask Daybreak</button>
+      <button id="settings" class="link">Settings</button>
+    </span>
+  </footer>
+
+  <script type="module" src="newtab.js"></script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.DS_Store
+.env
+# The extension's private signing key. Only the public key (in extension/manifest.json) belongs in the repo.
+keys/*.pem
+*.crx
+# Local Claude Code / editor settings
+.claude/

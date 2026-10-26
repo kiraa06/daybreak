@@ -1,0 +1,62 @@
+{
+  "manifest_version": 3,
+  "name": "Daybreak",
+  "version": "0.1.0",
+  "description": "Morning Brief, meeting prep, proactive pop-ups and a side-panel assistant for your browser, powered by your Claude subscription.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsZW/TPQEFG8dTXpueKZ0sfz8/3jCKmeNgvx8eEmQouca53mdlgKM3waCsEDALdsEN2XTisopifbWyiS48c6eTSRuKNbyJOKb1Wu29X3PRoaAa4OfOel23Py9XUq3GSca5uovgujBCXqeE0d1nAodZLzcSLmMTHURw+dUXGhA0LE6+CuGNXUzuf3+IE6gjwoNfkDMOk0Av8jV1KXcQiCpMSuCO0k63Aa1oDY0eyj8qzS0YHk+4q6kT+t/BAA1aqVWAyJNVw+OHdArQh2sHZEqWD9Jm7TRfMUyvF7Uh3pySFX5Kos66zRi4mFBzh6dZkXP/AJbp/g9JE6RDdoYGI6uawIDAQAB",
+  "minimum_chrome_version": "116",
+  "permissions": [
+    "nativeMessaging",
+    "alarms",
+    "notifications",
+    "sidePanel",
+    "storage",
+    "tabs",
+    "scripting",
+    "contextMenus"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "chrome_url_overrides": {
+    "newtab": "newtab.html"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "options_page": "options.html",
+  "action": {
+    "default_title": "Daybreak",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Alt+Shift+D",
+        "mac": "Alt+Shift+D"
+      },
+      "description": "Open the Daybreak side panel"
+    },
+    "open-brief": {
+      "suggested_key": {
+        "default": "Alt+Shift+B",
+        "mac": "Alt+Shift+B"
+      },
+      "description": "Open The Morning Brief"
+    }
+  }
+}
