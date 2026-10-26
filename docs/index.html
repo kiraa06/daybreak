@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Daybreak · Open-source Better Days alternative for any Chromium browser</title>
+  <meta name="description" content="Free, open-source Better Days alternative: a calm morning brief, meeting prep and AI side panel for Dia, Chrome, Arc and any Chromium browser.">
+  <meta name="keywords" content="Better Days alternative, Dia Better Days, Dia browser, morning brief, daily brief, meeting prep, Chrome extension, Arc browser, Claude, AI assistant, new tab">
+  <link rel="canonical" href="https://kiraa06.github.io/daybreak/">
+  <meta name="theme-color" content="#121212">
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Daybreak">
+  <meta property="og:title" content="Daybreak · Open-source Better Days alternative">
+  <meta property="og:description" content="A quiet morning brief for your browser. Meeting prep, gentle nudges and an AI side panel for any Chromium browser, on your own Claude subscription.">
+  <meta property="og:url" content="https://kiraa06.github.io/daybreak/">
+  <meta property="og:image" content="https://kiraa06.github.io/daybreak/screenshots/brief.jpg">
+  <meta property="og:image:alt" content="The Monday Brief: a Monet painting with the date and time running down either side">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Daybreak · Open-source Better Days alternative">
+  <meta name="twitter:description" content="A quiet morning brief for your browser, on your own Claude subscription.">
+  <meta name="twitter:image" content="https://kiraa06.github.io/daybreak/screenshots/brief.jpg">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Daybreak",
+    "alternateName": "Daybreak morning brief",
+    "description": "Open-source Better Days alternative: a morning brief, meeting prep, gentle pop-ups and an AI side-panel assistant for any Chromium browser, running on your own Claude subscription.",
+    "applicationCategory": "ProductivityApplication",
+    "operatingSystem": "macOS, Linux, Windows",
+    "browserRequirements": "Chromium-based browser (Dia, Chrome, Arc, Edge, Brave, Vivaldi, Opera)",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+    "license": "https://opensource.org/licenses/MIT",
+    "url": "https://kiraa06.github.io/daybreak/",
+    "codeRepository": "https://github.com/kiraa06/daybreak",
+    "image": "https://kiraa06.github.io/daybreak/screenshots/brief.jpg"
+  }
+  </script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      { "@type": "Question", "name": "Is Daybreak a Better Days alternative?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Yes. Daybreak gives you a Morning Brief and meeting prep like Dia's Better Days plan, in any Chromium browser, using the Claude subscription you already have. It is free, open source and not affiliated with The Browser Company." } },
+      { "@type": "Question", "name": "Which browsers does Daybreak work in?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Any Chromium browser that loads unpacked extensions: Dia, Chrome, Arc, Edge, Brave, Vivaldi, Opera and Chromium." } },
+      { "@type": "Question", "name": "Does Daybreak cost anything?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Daybreak is free and MIT-licensed. It runs on your own Claude subscription through the Claude Agent SDK, so there is no API key or separate plan." } },
+      { "@type": "Question", "name": "Does Daybreak need a Slack app?",
+        "acceptedAnswer": { "@type": "Answer", "text": "No. By default it reads Slack through the session already signed in to your browser, so it works in workspaces that don't allow installing apps." } }
+    ]
+  }
+  </script>
+
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #121212; --card: #1d1c1b; --ink: #f3efe6; --muted: #a39e94; --dim: #6f6b64; --line: #2c2b29; --accent: #f8e44c;
+      --serif: "Iowan Old Style", "Hoefler Text", Charter, Georgia, serif;
+      --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+      --mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font: 17px/1.65 var(--sans); -webkit-font-smoothing: antialiased; }
+    a { color: var(--accent); }
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+    header.top { display: flex; justify-content: space-between; align-items: center; padding: 22px 0; }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; letter-spacing: .01em; color: var(--ink); text-decoration: none; }
+    .brand svg { width: 26px; height: 26px; color: var(--accent); }
+    .gh { color: var(--muted); text-decoration: none; font-size: 15px; }
+    .gh:hover { color: var(--ink); }
+    .hero { text-align: center; padding: 48px 0 28px; }
+    .kicker { font: 12px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+    h1 { font: 700 clamp(44px, 7vw, 84px)/1.02 var(--serif); color: var(--accent); margin: 16px 0 14px; letter-spacing: -.01em; }
+    .sub { font: italic 400 clamp(19px, 2.4vw, 24px)/1.5 var(--serif); color: #ddd8cd; max-width: 720px; margin: 0 auto; }
+    .ctas { display: flex; gap: 12px; justify-content: center; margin: 28px 0 8px; flex-wrap: wrap; }
+    .btn { background: var(--ink); color: #151413; text-decoration: none; font-weight: 600; border-radius: 12px; padding: 12px 20px; }
+    .btn.ghost { background: var(--card); color: var(--ink); border: 1px solid var(--line); }
+    .note { color: var(--dim); font-size: 14px; }
+    figure { margin: 32px 0 0; }
+    figure img { width: 100%; border-radius: 14px; display: block; box-shadow: 0 30px 80px rgba(0,0,0,.5); }
+    figcaption { color: var(--dim); font: 12px var(--mono); margin-top: 10px; text-align: right; }
+    section { padding: 64px 0 0; }
+    h2 { font: italic 400 34px/1.15 var(--serif); margin: 0 0 14px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-top: 22px; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 20px 22px; }
+    .card h3 { margin: 0 0 6px; font-size: 18px; }
+    .card p { margin: 0; color: var(--muted); font-size: 15.5px; }
+    .two { display: grid; grid-template-columns: 1.1fr 1fr; gap: 32px; align-items: center; }
+    .two img { width: 100%; border-radius: 14px; }
+    .two img.panel-shot { max-width: 340px; justify-self: center; border: 1px solid var(--line); }
+    .lede { color: #ddd8cd; }
+    ul.never { padding-left: 20px; color: #ddd8cd; }
+    ul.never li { margin: 8px 0; }
+    pre { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; overflow-x: auto; font: 14px/1.6 var(--mono); color: #e7e2d7; }
+    details { border-top: 1px solid var(--line); padding: 14px 0; }
+    details summary { cursor: pointer; font-weight: 600; }
+    details p { color: var(--muted); margin: 8px 0 0; }
+    footer { color: var(--dim); font-size: 14px; padding: 64px 0 48px; text-align: center; }
+    @media (max-width: 760px) { .two { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <a class="brand" href="https://kiraa06.github.io/daybreak/">
+        <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M5 21a11 11 0 0 1 22 0z" fill="currentColor"/><rect x="3" y="23" width="26" height="2.2" rx="1.1" fill="currentColor"/></svg>
+        Daybreak
+      </a>
+      <a class="gh" href="https://github.com/kiraa06/daybreak">GitHub →</a>
+    </header>
+
+    <main>
+      <div class="hero">
+        <div class="kicker">The open-source Better Days alternative</div>
+        <h1>A quiet morning brief for your browser.</h1>
+        <p class="sub">Every weekday, Daybreak reads what happened while you were away and leaves one calm page on your new tab. It works in Dia, Chrome, Arc, Edge, Brave and any Chromium browser, on the Claude subscription you already have.</p>
+        <div class="ctas">
+          <a class="btn" href="https://github.com/kiraa06/daybreak#getting-started">Get Daybreak, free</a>
+          <a class="btn ghost" href="https://github.com/kiraa06/daybreak">View the source</a>
+        </div>
+        <div class="note">MIT-licensed · Runs on your computer · No API key</div>
+      </div>
+
+      <figure>
+        <img src="screenshots/brief.jpg" alt="Daybreak's Monday Brief: a Monet painting with the date and time running down either side, and the day's first priority underneath" width="1600" height="1111">
+        <figcaption>Stacks of Wheat (End of Summer), Claude Monet. Today's painting, courtesy of the Art Institute of Chicago.</figcaption>
+      </figure>
+
+      <section>
+        <h2>What's on the page</h2>
+        <p class="lede">It reads your email, calendar, tickets, docs and Slack, and tells you what matters today, who is waiting on you, and which meeting deserves ten minutes of preparation.</p>
+        <div class="grid">
+          <div class="card"><h3>Push your work forward</h3><p>The one or two moves that would make today count, with the names and ticket numbers already filled in.</p></div>
+          <div class="card"><h3>Top to-dos</h3><p>The loops you owe other people, each linked back to where it came from.</p></div>
+          <div class="card"><h3>New updates</h3><p>What moved in each thing you're working on since yesterday, tagged and with the people involved.</p></div>
+          <div class="card"><h3>Your day &amp; looking ahead</h3><p>Your meetings, the one worth preparing for, and a question about what you'd like to tackle tomorrow.</p></div>
+        </div>
+      </section>
+
+      <section class="two">
+        <div>
+          <h2>The rest of the day</h2>
+          <p class="lede">Five minutes before a meeting, a small card slides in with <strong>Ignore</strong>, <strong>Prep notes</strong> and <strong>Join</strong>. The prep notes are already written.</p>
+          <p class="lede">The side panel holds an assistant that knows your week. It can explain the page you're on, draft the reply you've been avoiding, or turn a thread into a one-pager or deck.</p>
+        </div>
+        <img class="panel-shot" src="screenshots/side-panel.jpg" alt="The Daybreak side panel answering 'What should I focus on today?'" loading="lazy" width="640" height="1158">
+      </section>
+
+      <section>
+        <h2>What Daybreak will never do</h2>
+        <ul class="never">
+          <li>Send, post or change anything on your behalf. Background work is read-only.</li>
+          <li>Ping you after hours, or more than three times an hour.</li>
+          <li>Ask for an API key. It uses your existing Claude subscription through the Claude Agent SDK.</li>
+          <li>Phone home. Your data stays in one folder on your computer.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Getting started</h2>
+        <pre><code>git clone https://github.com/kiraa06/daybreak.git &amp;&amp; cd daybreak
+python3 -m venv .venv &amp;&amp; .venv/bin/pip install -e .
+.venv/bin/daybreak install</code></pre>
+        <p class="lede">Then load the extension folder that <code>install</code> prints via <code>chrome://extensions</code> → Developer mode → Load unpacked. The <a href="https://github.com/kiraa06/daybreak#getting-started">README</a> has the details.</p>
+      </section>
+
+      <section>
+        <h2>Questions people ask</h2>
+        <details open><summary>Is Daybreak a Better Days alternative?</summary>
+          <p>Yes. Dia's Better Days plan includes a lovely Morning Brief and meeting prep. Daybreak gives you the same kind of morning in whichever Chromium browser you use, Dia included, on the Claude subscription you already pay for. It's free, open source, and not affiliated with The Browser Company.</p></details>
+        <details><summary>Which browsers does it work in?</summary>
+          <p>Any Chromium browser that loads unpacked extensions: Dia, Chrome, Arc, Edge, Brave, Vivaldi, Opera and Chromium.</p></details>
+        <details><summary>Does it need a Slack app?</summary>
+          <p>No. By default it reads Slack through the session already signed in to your browser, so it works even where installing apps isn't allowed.</p></details>
+        <details><summary>Why a painting?</summary>
+          <p>Because the first thing you see in the morning should be nicer than an inbox. A different public-domain painting each day.</p></details>
+      </section>
+    </main>
+
+    <footer>
+      Daybreak is free and MIT-licensed · <a href="https://github.com/kiraa06/daybreak">github.com/kiraa06/daybreak</a><br>
+      Not affiliated with The Browser Company, Anthropic or Slack.
+    </footer>
+  </div>
+</body>
+</html>

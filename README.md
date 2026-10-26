@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/screenshots/brief.jpg" alt="The Monday Brief: a Monet painting with the date and time running down either side, and the day's first priority underneath" width="100%">
+  <img src="docs/screenshots/brief.jpg" alt="Daybreak's Monday Brief, an open-source Better Days alternative: a Monet painting with the date and time running down either side, and the day's first priority underneath" width="100%">
 </p>
 
 <h1 align="center">Daybreak</h1>
@@ -7,7 +7,11 @@
 <p align="center"><em>A quiet morning brief for your browser.</em></p>
 
 <p align="center">
-  Runs on your own Claude subscription · Lives on your computer · Works in any Chromium browser · MIT
+  The open-source <strong>Better Days alternative</strong> for Dia, Chrome, Arc, Edge, Brave and any Chromium browser.
+</p>
+
+<p align="center">
+  Runs on your own Claude subscription · Lives on your computer · Free and MIT-licensed
 </p>
 
 ---
@@ -171,6 +175,11 @@ and models there. The data folder is:
 - Windows: `%LOCALAPPDATA%\Daybreak`
 
 ## Questions people ask
+
+**Is this a Better Days alternative?**
+Yes, that's where it started. Dia's Better Days plan includes a lovely Morning Brief and meeting prep. Daybreak gives
+you the same kind of morning in whichever Chromium browser you already use, Dia included. It runs on the Claude
+subscription you already pay for, and it's free and open source. It isn't affiliated with The Browser Company.
 
 **Why a painting?**
 Because the first thing you see in the morning should be nicer than an inbox. Each day brings a different painting
