@@ -25,6 +25,7 @@ async function setup() {
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({ id: "ask-page", title: "Ask Daybreak about this page", contexts: ["page"] });
     chrome.contextMenus.create({ id: "ask-selection", title: "Ask Daybreak about “%s”", contexts: ["selection"] });
+    chrome.contextMenus.create({ id: "open-brief", title: "Open today's brief", contexts: ["action"] });
   });
 }
 
@@ -163,6 +164,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 });
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId === "open-brief") return chrome.tabs.create({ url: chrome.runtime.getURL("newtab.html") });
   const prompt = info.menuItemId === "ask-selection"
     ? `About this selection from "${tab?.title || "this page"}": “${info.selectionText}” — explain it and tell me what matters for my work.`
     : "Summarize this page and tell me what matters for my work.";

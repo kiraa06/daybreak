@@ -3,7 +3,8 @@
 Seeds a throwaway data folder with a fictional person's brief, starts the helper in dev mode against it (no background
 loops, so no connector is ever called) and screenshots the pages with Playwright:
 
-    .venv/bin/python docs/make_demo.py
+    .venv/bin/python docs/make_demo.py            # write docs/screenshots/*
+    .venv/bin/python docs/make_demo.py --serve    # just seed and serve (used by tests/e2e_extension.py)
 """
 import asyncio
 import json
@@ -18,7 +19,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "docs/screenshots"
-PORT = 47899
+PORT = int(next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--port=")), 47899))
 HOME = Path(tempfile.mkdtemp(prefix="daybreak-demo-"))
 os.environ["DAYBREAK_HOME"] = str(HOME)
 sys.path.insert(0, str(ROOT))
@@ -132,6 +133,9 @@ def seed() -> None:
 def main() -> None:
     seed()
     env = {**os.environ, "DAYBREAK_DEV": "1", "DAYBREAK_NO_LOOPS": "1", "DAYBREAK_HOME": str(HOME)}
+    if "--serve" in sys.argv:  # isolated helper for tests: announce where it lives, then serve until killed
+        print(json.dumps({"home": str(HOME), "port": PORT}), flush=True)
+        os.execve(sys.executable, [sys.executable, "-m", "daybreak", "run"], env)
     server = subprocess.Popen([sys.executable, "-m", "daybreak", "run"], cwd=ROOT, env=env,
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:

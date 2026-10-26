@@ -171,6 +171,7 @@ $("input").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send($("input").value); }
 });
 $("new").onclick = () => { chatId = null; location.reload(); };
+$("open-brief").onclick = () => chrome.tabs.create({ url: chrome.runtime.getURL("newtab.html") });
 $("history").onchange = (e) => e.target.value && openChat(e.target.value);
 chrome.storage.onChanged.addListener((changes) => { if (changes.pendingPrompt?.newValue) takePending(); });
 chrome.tabs.onActivated.addListener(updatePageLabel);

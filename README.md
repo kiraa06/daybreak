@@ -42,8 +42,8 @@ status tag (*Active*, *Awaiting reply*, *Needs you*), and shows who's involved.
 
 **Looking ahead** asks what you'd like to work on tomorrow. Tomorrow's brief remembers your answer.
 
-The brief opens as its own tab the first time you use your browser in the morning. You can bring it back any time
-with ⌥⇧B.
+The brief opens as its own tab the first time you use your browser in the morning. To bring it back any time, press
+⌥⇧B, click **Brief** at the top of the side panel, or right-click the toolbar icon and choose *Open today's brief*.
 
 ## The rest of the day
 
