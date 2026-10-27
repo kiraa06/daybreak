@@ -227,6 +227,8 @@ class Sensors:
             s, e = to_epoch(m.get("start"), 0), to_epoch(m.get("end"), 0)
             if not s:
                 continue
+            if not e or e <= s or e - s > 12 * 3600:  # e.g. a recurring series' last date read as the end time
+                e = s + 3600
             seen.add(mid)
             self.db.x(
                 "INSERT INTO meetings(id, title, start, end, attendees, organizer, location, join_url, description, updated) "
@@ -237,10 +239,12 @@ class Sensors:
                 (mid, str(m.get("title", "Untitled"))[:200], s, e or s + 1800, json.dumps(m.get("attendees") or [])[:4000],
                  str(m.get("organizer", ""))[:120], str(m.get("location", ""))[:200], str(m.get("join_url", ""))[:500],
                  str(m.get("description", ""))[:1500], time.time()))
-        # Meetings that disappeared from the window were cancelled or declined.
+        # Meetings that disappeared from the window were cancelled or declined; anything older than a day is history.
         for row in self.db.all("SELECT id FROM meetings WHERE start BETWEEN ? AND ?", (start.timestamp(), end.timestamp())):
             if row["id"] not in seen:
                 self.db.x("DELETE FROM meetings WHERE id = ?", (row["id"],))
+        self.db.x("DELETE FROM meetings WHERE start < ? AND prep_artifact = ''", (time.time() - 86400,))
+        self.db.x("UPDATE meetings SET end = start + 3600 WHERE end - start > 43200 OR end <= start")
         return len(seen)
 
     async def _ics_meetings(self, start: datetime, end: datetime) -> list[dict]:

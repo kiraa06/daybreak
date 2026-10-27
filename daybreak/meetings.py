@@ -31,7 +31,8 @@ class Meetings:
 
     def upcoming(self, hours: float = 48) -> list[dict]:
         now = time.time()
-        rows = self.db.all("SELECT * FROM meetings WHERE end > ? AND start < ? ORDER BY start", (now, now + hours * 3600))
+        rows = self.db.all("SELECT * FROM meetings WHERE end > ? AND start > ? AND start < ? ORDER BY start",
+                           (now, now - 12 * 3600, now + hours * 3600))
         for r in rows:
             r["attendees"] = json.loads(r["attendees"] or "[]")
             r["prep_url"] = artifacts.url_for(self.cfg, r["prep_artifact"]) if r["prep_artifact"] else ""
