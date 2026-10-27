@@ -135,6 +135,11 @@ button { font: inherit; color: inherit; }
 
 .foot { width: var(--w); margin: 64px auto 0; padding: 18px 0 36px; display: flex; justify-content: space-between; gap: 16px; color: var(--dim); font-size: 13px; border-top: 1px solid var(--line); }
 .foot-actions { display: flex; gap: 18px; }
+.foot { flex-wrap: wrap; }
+.auth-warn { flex-basis: 100%; background: #3b2f1c; color: #f6d79b; border: 1px solid #5c4724; border-radius: 12px;
+  padding: 12px 16px; font-size: 14.5px; line-height: 1.5; }
+.auth-warn strong { color: #fde9b8; }
+.auth-warn code { font: 13px var(--mono); background: #2a2116; padding: 1px 6px; border-radius: 6px; }
 .link { background: none; border: 0; padding: 0; color: var(--muted); cursor: pointer; }
 .link:hover { color: var(--ink); }
 

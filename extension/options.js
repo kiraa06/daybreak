@@ -8,6 +8,12 @@ async function refresh() {
     const [st, settings, schedules] = await Promise.all([api("/api/state"), api("/api/settings"), api("/api/schedules")]);
     $("conn").innerHTML = `<span class="ok">Connected</span> to the helper as <strong>${esc(st.me)}</strong>. ` +
       `${st.workstreams} live workstreams. Config file: <code>${esc(settings.config_path)}</code>`;
+    if (st.claude_auth && st.claude_auth.ok === false) {
+      const since = new Date(st.claude_auth.since * 1000).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
+      $("conn").innerHTML += `<br><br><span class="bad"><strong>Claude sign-in expired</strong> (since ${esc(since)}).</span> ` +
+        `Daybreak can't read your sources until you sign in again: open Terminal, run <code>claude</code>, then type ` +
+        `<code>/login</code>. It picks the new sign-in up on its own.`;
+    }
     for (const k of ["name", "brief_time", "slack", "slack_workspace"]) $(k).value = settings[k] ?? "";
     const names = { gmail: "Gmail", atlassian: "Jira & Confluence", drive: "Google Drive", calendar: "Google Calendar", slack: "Slack", bitbucket: "Bitbucket" };
     $("sources").innerHTML = Object.entries(st.sources || {}).map(([k, v]) => {

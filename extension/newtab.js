@@ -41,6 +41,18 @@ function facepile(people = []) {
 const sourceLink = (s) => (s && s.url && /^https?:/.test(s.url))
   ? `<a class="src" href="${esc(s.url)}" target="_blank" rel="noreferrer">${esc(s.label || "Open")}</a>` : "";
 
+// When the Claude Code login has expired nothing can be read, so say that plainly instead of a row of ✕.
+function authWarning(state) {
+  const a = state?.claude_auth;
+  const box = document.getElementById("auth-warn");
+  if (!a || a.ok !== false) { box.hidden = true; return false; }
+  const since = new Date(a.since * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  box.innerHTML = `<strong>Claude sign-in expired</strong> (since ${esc(since)}), so Daybreak can't read your sources. ` +
+    `Open Terminal, run <code>claude</code>, then type <code>/login</code>. Daybreak picks it up on its own.`;
+  box.hidden = false;
+  return true;
+}
+
 function statusLine(state) {
   const src = state.sources || {};
   const label = { gmail: "Gmail", atlassian: "Jira", drive: "Drive", calendar: "Calendar", slack: "Slack", bitbucket: "Bitbucket" };
@@ -208,6 +220,7 @@ async function renderBrief(b, state, meetings) {
   renderDay(b, meetings);
   renderAhead(b);
   $("status").textContent = statusLine(state);
+  authWarning(state);
 }
 
 async function load(day) {
@@ -227,6 +240,12 @@ async function load(day) {
   }
   if (b.missing) {
     const st = b.state || {};
+    if (authWarning(st)) {
+      return showEmpty("Claude needs you to sign in again",
+        "Your Claude Code sign-in has expired, so Daybreak can't read your sources or write today's brief.\n" +
+        "Open Terminal, run <code>claude</code>, then type <code>/login</code>. Daybreak picks it up on its own.",
+        [{ label: "Try again", onClick: () => load() }]);
+    }
     const busy = (st.activity || []).length;
     clearTimeout(pollTimer);
     if (busy) pollTimer = setTimeout(() => load(), 5000);

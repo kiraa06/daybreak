@@ -122,12 +122,25 @@ def parse_jsonl(text: str) -> list[dict]:
 
 # --- runner --------------------------------------------------------------------
 
+# How the CLI reports that the Claude Code login can't be used (expired, revoked, logged out).
+AUTH_ERROR = re.compile(r"failed to authenticate|oauth session expired|could not be refreshed|authentication_failed|"
+                        r"invalid (?:authentication|bearer|api key)|please run /login|\b401\b", re.I)
+
+
 class Claude:
-    def __init__(self, cfg: Config, *, concurrency: int = 3):
+    def __init__(self, cfg: Config, *, concurrency: int = 3, on_auth: Callable[[bool, str], None] | None = None):
         self.cfg = cfg
         self.sem = asyncio.Semaphore(concurrency)
         self.plugins = _enabled_plugins()
         self.stats = {"calls": 0, "errors": 0, "seconds": 0.0}
+        self.on_auth = on_auth  # told whether the login works, so the user hears about an expired sign-in
+
+    def _report_auth(self, ok: bool, message: str = "") -> None:
+        if self.on_auth:
+            try:
+                self.on_auth(ok, message)
+            except Exception:
+                log.exception("auth callback failed")
 
     def options(self, *, system: str, connectors: bool, max_turns: int = 1, model: str | None = None,
                 allow_drafts: bool = False, sdk_servers: dict | None = None, partial: bool = False,
@@ -203,12 +216,18 @@ class Claude:
                                 is_error = bool(msg.is_error)
             except Exception as e:
                 self.stats["errors"] += 1
+                detail = f"{e} {signals[-3:]}"
+                if AUTH_ERROR.search(detail):
+                    self._report_auth(False, str(e))
                 raise RuntimeError(f"Claude call '{label}' failed: {e}; signals={signals[-3:]}") from e
             finally:
                 self.stats["seconds"] += time.monotonic() - t0
             if is_error:
                 self.stats["errors"] += 1
+                if AUTH_ERROR.search(final or ""):
+                    self._report_auth(False, final or "")
                 raise RuntimeError(f"Claude call '{label}' returned an error: {final}")
+            self._report_auth(True)
             log.info("[%s] done in %.1fs", label, time.monotonic() - t0)
             return (final or "".join(chunks)).strip()
 

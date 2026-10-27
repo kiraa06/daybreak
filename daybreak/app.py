@@ -20,13 +20,15 @@ from .sensors import Sensors
 
 log = logging.getLogger("daybreak")
 
+AUTH_FIX = "Open Terminal, run `claude`, then type /login. Daybreak picks the new sign-in up on its own."
+
 
 class App:
     def __init__(self):
         scrub_host_env()
         self.cfg = config.load()
         self.db = DB()
-        self.claude = Claude(self.cfg)
+        self.claude = Claude(self.cfg, on_auth=self._claude_auth)
         self.bridge = Bridge(self.db)
         self.sensors = Sensors(self.cfg, self.db, self.claude, self.bridge)
         self.brief = Brief(self.cfg, self.db, self.claude, lambda: self.me)
@@ -38,6 +40,27 @@ class App:
         self.meeting_lock = asyncio.Lock()
         self.activity: dict[str, str] = {}
         self.tasks: list[asyncio.Task] = []
+
+    def _claude_auth(self, ok: bool, message: str) -> None:
+        """Track whether the Claude Code login works; when it doesn't, say so loudly (desktop + browser)."""
+        prev = self.db.get("claude_auth") or {"ok": True}
+        now = time.time()
+        if ok:
+            if not prev.get("ok", True):
+                log.info("Claude sign-in works again")
+                self.db.put("claude_auth", {"ok": True, "at": now})
+            return
+        broken_before = not prev.get("ok", True)
+        state = {"ok": False, "since": prev.get("since", now) if broken_before else now, "at": now,
+                 "message": message[:300], "alerted": prev.get("alerted", 0) if broken_before else 0}
+        if now - state["alerted"] > 3 * 3600:  # tell the user now, then at most every 3 hours while it stays broken
+            state["alerted"] = now
+            log.warning("Claude sign-in failed: %s", message[:200])
+            osutil.notify("Daybreak", "Claude sign-in expired", AUTH_FIX.replace("`", ""))
+            nid = self.db.add_nudge("auth", "Claude sign-in expired", AUTH_FIX, {}, ttl=3 * 3600, dedupe=f"auth:{int(now)}")
+            if nid:  # the desktop notification already went out; don't send a second one from the fallback loop
+                self.db.x("UPDATE nudges SET os_notified = 1 WHERE id = ?", (nid,))
+        self.db.put("claude_auth", state)
 
     @property
     def me(self) -> str:
@@ -221,4 +244,5 @@ class App:
             "slack_workspaces": self.db.get("slack_workspaces", []),
             "brief_time": datetime.now().replace(hour=self.cfg.brief_time[0], minute=self.cfg.brief_time[1]).strftime("%-I:%M %p"),
             "brief_error": self.db.get("brief_error"), "claude": self.claude.stats,
+            "claude_auth": self.db.get("claude_auth") or {"ok": True}, "auth_fix": AUTH_FIX,
         }
