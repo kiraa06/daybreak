@@ -139,6 +139,9 @@ def make_app(app: App) -> web.Application:
         body = await r.json()
         if body.get("action") == "dismiss":
             app.db.x("UPDATE nudges SET dismissed_at = ? WHERE id = ?", (time.time(), r.match_info["id"]))
+        elif body.get("action") == "shown":
+            log.info("pop-up %s shown as %s (browser in front: %s)", r.match_info["id"],
+                     " + ".join(map(str, body.get("via") or [])) or "nothing", body.get("in_front"))
         return ok(ok=True)
 
     @routes.get("/api/workstreams")

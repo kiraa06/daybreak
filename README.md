@@ -60,6 +60,10 @@ what the meeting is really about, what's likely to come up, and what you might w
 When someone is genuinely waiting on you, Daybreak may tap you on the shoulder. Gently. At most three times an hour,
 and never in the evening.
 
+If you're off in another app, both kinds also arrive as a regular system notification, with **Join** and **Prep notes**
+buttons on the meeting one, so a page you can't see doesn't make you late. The card waits on the page for when you're
+back. (On macOS, allow notifications for your browser under System Settings → Notifications.)
+
 <img src="docs/screenshots/side-panel.jpg" alt="The side panel assistant answering 'What should I focus on today?'" width="300" align="right">
 
 Open the side panel (⌥⇧D) and you have an assistant that already knows your week. You can:

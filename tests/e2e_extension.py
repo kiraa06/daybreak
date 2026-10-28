@@ -7,8 +7,8 @@ Needs Python Playwright with its Chromium (`pip install playwright && playwright
 
     .venv/bin/python tests/e2e_extension.py
 
-Checks: native-messaging pairing, the new-tab brief, a meeting pop-up injected into a normal page, the side panel and
-its "Brief" button.
+Checks: native-messaging pairing, the new-tab brief, a meeting pop-up injected into a normal page, system banners while
+the browser is in the background (and their Join and Prep buttons), the side panel and its "Brief" button.
 """
 import json
 import sqlite3
@@ -127,6 +127,8 @@ def run(home: Path):
             check("pop-up shows title, people and Join", "E2E Test Meeting" in text and "Join" in text)
             web.screenshot(path=str(OUT / "popup.png"))
 
+        check_banners(ctx, db, web)
+
         panel = ctx.new_page()
         panel.goto(f"chrome-extension://{ext_id}/sidepanel.html")
         panel.wait_for_timeout(2500)
@@ -138,6 +140,83 @@ def run(home: Path):
         check("side panel's Brief button opens the brief", brief_tab.url.endswith("/newtab.html"))
         panel.screenshot(path=str(OUT / "sidepanel.png"))
         ctx.close()
+
+
+def add_nudge(db, kind, title, body, payload):
+    nid = "e2e" + uuid.uuid4().hex[:10]
+    db.execute("INSERT INTO nudges(id, kind, title, body, payload, dedupe, deliver_at, expires_at) VALUES(?,?,?,?,?,?,?,?)",
+               (nid, kind, title, body, json.dumps(payload), nid, time.time(), time.time() + 300))
+    db.commit()
+    return nid
+
+
+def check_banners(ctx, db, web):
+    """With the browser in the background, meetings and "needs you" pop-ups also go out as system banners."""
+    sw = ctx.service_workers[0]
+    # A headless browser can't lose focus to another app, so tell the extension it has.
+    sw.evaluate("self.__realLastFocused = chrome.windows.getLastFocused;"
+                "chrome.windows.getLastFocused = async () => ({ id: -1, focused: false })")
+    meeting = {"meeting_id": "e2e-m1", "title": "Banner Sync", "attendees": ["Grace Hopper"],
+               "join_url": "https://example.com/?join", "prep_url": "https://example.com/?prep"}
+    soon = add_nudge(db, "meeting", "Banner Sync", "in 5 min", meeting)
+    now = add_nudge(db, "meeting", "Banner Sync", "now", meeting)
+    ask = add_nudge(db, "followup", "Ada needs the rollout plan", "She asked in #launch an hour ago.",
+                    {"url": "https://example.com/?thread", "prompt": "Draft the rollout plan Ada asked for"})
+    shown = {}
+    for _ in range(45):
+        shown = sw.evaluate("Promise.all([chrome.notifications.getAll(), chrome.storage.session.get(null)])"
+                            ".then(([live, s]) => ({ live: Object.keys(live), stored: s }))")
+        if f"nudge:{ask}" in shown["live"] and f"nudge:{now}" in shown["live"]:
+            break
+        time.sleep(2)
+    live, stored = shown.get("live", []), shown.get("stored", {})
+    check("meeting banner goes out with Join and Prep", (stored.get(f"nudge:{now}") or {}).get("actions") == ["join", "prep"],
+          str(live))
+    check("'now' banner replaces the 'in 5 min' one", f"nudge:{soon}" not in live and f"nudge:{now}" in live)
+    check("needs-you banner goes out with Open and Ask", (stored.get(f"nudge:{ask}") or {}).get("actions") == ["open", "ask"])
+    cards = web.evaluate("(document.getElementById('daybreak-toast-host')?.shadowRoot.textContent || '')")
+    check("the cards are still drawn in the page for when you're back", "Banner Sync" in cards and "rollout plan" in cards)
+
+    # Ignoring the card in the page clears its banner too.
+    web.evaluate("""[...document.getElementById('daybreak-toast-host').shadowRoot.querySelectorAll('.card')]
+                    .find(c => c.textContent.includes('rollout plan')).querySelector('[data-a=dismiss]').click()""")
+    gone = False
+    for _ in range(10):
+        gone = f"nudge:{ask}" not in sw.evaluate("chrome.notifications.getAll().then(Object.keys)")
+        if gone:
+            break
+        time.sleep(0.5)
+    check("ignoring the card clears its banner", gone)
+
+    # The banner's buttons: Join and Prep open their links (run through the same code a click runs).
+    page = ctx.new_page()
+    page.goto(f"chrome-extension://{config.EXTENSION_ID}/options.html")
+    opened = []
+    for action in ("join", "prep"):
+        with ctx.expect_page(timeout=10000) as tab:
+            page.evaluate("([n, a]) => import('./banner.js').then(m => m.runBannerAction(n, a))",
+                          [{"id": now, "kind": "meeting", "payload": meeting}, action])
+        tab.value.wait_for_load_state()
+        opened.append(tab.value.url)
+        tab.value.close()
+    check("banner Join and Prep open the meeting and the notes",
+          opened == ["https://example.com/?join", "https://example.com/?prep"], str(opened))
+    page.close()
+
+    # Back in the browser: the card alone, no banner.
+    sw.evaluate("chrome.windows.getLastFocused = async () => ({ id: -1, focused: true })")
+    here = add_nudge(db, "followup", "Linus wants a review", "On the cache change.", {"url": "https://example.com/?pr"})
+    drawn = False
+    for _ in range(45):
+        drawn = "Linus wants a review" in web.evaluate(
+            "(document.getElementById('daybreak-toast-host')?.shadowRoot.textContent || '')")
+        if drawn:
+            break
+        time.sleep(2)
+    time.sleep(1)
+    check("no banner while the browser is in front", drawn and f"nudge:{here}" not in
+          sw.evaluate("chrome.notifications.getAll().then(Object.keys)"))
+    sw.evaluate("chrome.windows.getLastFocused = self.__realLastFocused")
 
 
 if __name__ == "__main__":

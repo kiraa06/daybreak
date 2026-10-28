@@ -2,6 +2,7 @@
 import { api, post, askInPanel } from "./api.js";
 import { slackFetch } from "./slack.js";
 import { renderToast } from "./toast.js";
+import { BANNER_KINDS, browserInFront, clearBanner, listenForBannerClicks, showBanner } from "./banner.js";
 
 const TICK = "daybreak-tick";
 let lastHello = 0;
@@ -99,6 +100,20 @@ chrome.commands.onCommand.addListener((cmd) => {
 
 async function showNudge(n) {
   if (n.kind === "brief" && (await maybeOpenBrief({ force: true }))) return;
+  // In another app you'd never see a card inside a page, so meetings and "needs you" also go out as a system banner.
+  // The card is still drawn, so it's waiting when you come back.
+  const inFront = await browserInFront();
+  const away = BANNER_KINDS.has(n.kind) && !inFront;
+  const via = [];
+  if (away) await showBanner(n).then(() => via.push("banner"), (e) => console.warn("banner failed", e));
+  const card = await drawCard(n);
+  if (card) via.push(card);
+  else if (!away) await showBanner(n).then(() => via.push("banner"), (e) => console.warn("banner failed", e));
+  post(`/api/nudges/${n.id}`, { action: "shown", via, in_front: inFront }).catch(() => {});  // for the helper's log
+}
+
+// Draws the pop-up card on the page you're on (or on the brief); says where, or null if there was nowhere to draw it.
+async function drawCard(n) {
   const isWeb = (t) => t && /^https?:/.test(t.url || "") && !/chromewebstore|chrome\.google\.com\/webstore/.test(t.url);
   let [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   if (!isWeb(tab) && !(tab?.url || "").startsWith(chrome.runtime.getURL(""))) {
@@ -106,55 +121,26 @@ async function showNudge(n) {
     const actives = (await chrome.tabs.query({ active: true })).filter(isWeb);
     tab = actives.sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0] || tab;
   }
-  const injectable = isWeb(tab);
-  if (injectable) {
+  if (isWeb(tab)) {
     try {
       await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: renderToast, args: [n] });
-      return;
+      return "page";
     } catch (e) {
       console.warn("toast injection failed; using a system notification", e);
     }
   }
   // New tab page (our brief) listens for this and renders the same toast itself.
   const delivered = await chrome.runtime.sendMessage({ type: "daybreak-toast", nudge: n }).catch(() => false);
-  if (delivered) return;
-  const buttons = [];
-  if (n.kind === "meeting" && n.payload.join_url) buttons.push({ title: "Join" });
-  if (n.kind === "meeting" && n.payload.prep_url) buttons.push({ title: "Prep notes" });
-  chrome.notifications.create(`nudge:${n.id}`, {
-    type: "basic", iconUrl: "icons/icon128.png", priority: 2,
-    title: n.kind === "meeting" ? `${n.title} ${n.body}` : n.title,
-    message: n.kind === "meeting" ? (n.payload.attendees || []).slice(0, 4).join(", ") : n.body || "",
-    buttons,
-  });
-  await chrome.storage.session.set({ [`nudge:${n.id}`]: n });
+  return delivered ? "brief" : null;
 }
 
-chrome.notifications.onClicked.addListener(async (nid) => {
-  const n = (await chrome.storage.session.get(nid))[nid];
-  if (!n) return;
-  const p = n.payload || {};
-  if (n.kind === "brief") chrome.tabs.create({});
-  else if (p.prep_url || p.url) chrome.tabs.create({ url: p.prep_url || p.url });
-  else if (p.prompt) askInPanel(p.prompt);
-  chrome.notifications.clear(nid);
-});
-
-chrome.notifications.onButtonClicked.addListener(async (nid, idx) => {
-  const n = (await chrome.storage.session.get(nid))[nid];
-  if (!n) return;
-  const p = n.payload || {};
-  const order = [p.join_url ? "join" : null, p.prep_url ? "prep" : null].filter(Boolean);
-  const action = order[idx];
-  if (action === "join") chrome.tabs.create({ url: p.join_url });
-  if (action === "prep") chrome.tabs.create({ url: p.prep_url });
-  chrome.notifications.clear(nid);
-});
+listenForBannerClicks();
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg?.type !== "daybreak-nudge-action") return;
   const { id, action, url, prompt } = msg;
   (async () => {
+    clearBanner(`nudge:${id}`);  // acted on in the page, so the matching banner can go
     if (action === "dismiss") await post(`/api/nudges/${id}`, { action: "dismiss" }).catch(() => {});
     if (action === "open" && url) await chrome.tabs.create({ url });
     if (action === "brief") await chrome.tabs.create({});
