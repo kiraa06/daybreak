@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import logging.handlers
+import os
 import shutil
 import subprocess
 import sys
@@ -84,8 +85,47 @@ def cmd_install(args) -> None:
                 k, v = line.split("=", 1)
                 env[k.strip()] = v.strip()
     print(osutil.install_service(python, workdir, env, config.LOG_DIR))
+    _link_command(python)
     print(f"\nLoad the extension: chrome://extensions → Developer mode → Load unpacked → {ext}\n"
           "After pulling new code, run `daybreak install` again and reload the extension.")
+    from .claude import own_login
+    if not own_login():
+        print("\nRecommended: run `daybreak login` to give Daybreak its own Claude sign-in. Until then it shares your\n"
+              "terminal's, and a background process refreshing a stale copy can sign you out everywhere.")
+
+
+def _link_command(python: str) -> None:
+    """Put `daybreak` on PATH via ~/.local/bin (where Claude Code's own installer puts `claude`), if that exists."""
+    bin_dir, target = Path.home() / ".local/bin", Path(python).parent / "daybreak"
+    link = bin_dir / "daybreak"
+    if sys.platform.startswith("win") or not bin_dir.is_dir() or not target.exists():
+        return
+    if link.is_symlink() or not link.exists():
+        link.unlink(missing_ok=True)
+        link.symlink_to(target)
+        print(f"linked {link} → {target}")
+
+
+def cmd_login(_args) -> None:
+    """Sign Daybreak in to Claude on its own, apart from the login your terminal uses."""
+    from .claude import cli_path, scrub_host_env
+    scrub_host_env()
+    config.CLAUDE_DIR.mkdir(parents=True, exist_ok=True)
+    env = {**os.environ, "CLAUDE_CONFIG_DIR": str(config.CLAUDE_DIR)}
+    cli = cli_path()
+    print("Signing Daybreak in to Claude. A browser window will open: use the Claude account you use for Claude Code.\n"
+          "This sign-in is Daybreak's own, so it can't log your terminal out (or the other way round).\n")
+    subprocess.run([cli, "auth", "login", "--claudeai"], env=env)
+    out = subprocess.run([cli, "auth", "status", "--json"], env=env, capture_output=True, text=True).stdout
+    try:
+        status = json.loads(out or "{}")
+    except json.JSONDecodeError:
+        status = {}
+    marker = config.CLAUDE_DIR / ".signed-in"
+    if not status.get("loggedIn"):
+        sys.exit("Daybreak isn't signed in yet. Run `daybreak login` again to retry.")
+    marker.write_text(json.dumps({"at": time.time(), "method": status.get("authMethod", "")}))
+    print("\nDaybreak is signed in. The helper picks this up on its next Claude call; nothing to restart.")
 
 
 def cmd_uninstall(_args) -> None:
@@ -112,6 +152,7 @@ def main() -> None:
     ip = sub.add_parser("install", help="install into the data folder, register the native host, start at login")
     ip.add_argument("--editable", action="store_true", help="run the service straight from this checkout (development)")
     sub.add_parser("uninstall", help="remove the native host and login item")
+    sub.add_parser("login", help="give Daybreak its own Claude sign-in, separate from your terminal's")
     args = p.parse_args()
     setup_logging(args.verbose)
 
@@ -148,6 +189,8 @@ def main() -> None:
         cmd_install(args)
     elif args.cmd == "uninstall":
         cmd_uninstall(args)
+    elif args.cmd == "login":
+        cmd_login(args)
 
 
 if __name__ == "__main__":

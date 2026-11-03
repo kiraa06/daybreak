@@ -2,9 +2,9 @@
 
 Two modes:
 - plain:      no tools, no settings — fast text/JSON transforms (routing, synthesis, briefs).
-- connectors: loads the user's Claude Code config so the claude.ai connectors (Gmail, Drive,
-              Atlassian, Calendar, Slack...) are available, with hooks and plugins switched off
-              and a permission gate that only lets read-only connector tools run.
+- connectors: loads Claude Code's user config (Daybreak's own after `daybreak login`) so the claude.ai
+              connectors (Gmail, Drive, Atlassian, Calendar, Slack...) are available, with hooks and plugins
+              switched off and a permission gate that only lets read-only connector tools run.
 """
 from __future__ import annotations
 
@@ -13,6 +13,8 @@ import json
 import logging
 import os
 import re
+import shutil
+import sys
 import time
 from pathlib import Path
 from typing import Any, AsyncIterator, Callable
@@ -30,6 +32,7 @@ from claude_agent_sdk import (
     ToolUseBlock,
 )
 
+from . import config
 from .config import Config
 
 log = logging.getLogger("daybreak.claude")
@@ -48,6 +51,40 @@ def scrub_host_env() -> list[str]:
     for k in removed:
         os.environ.pop(k)
     return removed
+
+
+# --- sign-in -------------------------------------------------------------------
+# By default the CLI uses the same Claude Code login as your terminal. That login's refresh token rotates, and a
+# background process that refreshes with a stale copy (say, one that slept through the night on a closed laptop)
+# makes the server revoke the login everywhere. `daybreak login` gives Daybreak a sign-in of its own, in its own
+# config folder and keychain entry, so the two can never knock each other out.
+
+def cli_path() -> str:
+    """The Claude Code CLI the SDK runs: its bundled copy, else the one on PATH."""
+    import claude_agent_sdk
+    bundled = Path(claude_agent_sdk.__file__).parent / "_bundled" / ("claude.exe" if sys.platform == "win32" else "claude")
+    return str(bundled) if bundled.exists() else (shutil.which("claude") or "claude")
+
+
+def own_login() -> bool:
+    """True once `daybreak login` has signed Daybreak in on its own."""
+    return (config.CLAUDE_DIR / ".signed-in").exists()
+
+
+def login_env() -> dict[str, str]:
+    """Extra environment for the CLI: Daybreak's own config folder, when it has its own sign-in."""
+    return {"CLAUDE_CONFIG_DIR": str(config.CLAUDE_DIR)} if own_login() else {}
+
+
+def daybreak_command() -> str:
+    """How to run `daybreak` from a terminal: plain if `install` linked it onto PATH, else the full path."""
+    if (Path.home() / ".local/bin/daybreak").exists():
+        return "daybreak"
+    return f'"{Path(sys.executable).parent / "daybreak"}"'
+
+
+def auth_fix() -> str:
+    return f"Open Terminal and run `{daybreak_command()} login`. Daybreak picks the new sign-in up on its own."
 
 
 # --- permission gate ---------------------------------------------------------
@@ -135,7 +172,7 @@ class Claude:
         self.stats = {"calls": 0, "errors": 0, "seconds": 0.0}
         self.on_auth = on_auth  # told whether the login works, so the user hears about an expired sign-in
 
-    def _report_auth(self, ok: bool, message: str = "") -> None:
+    def report_auth(self, ok: bool, message: str = "") -> None:
         if self.on_auth:
             try:
                 self.on_auth(ok, message)
@@ -152,6 +189,8 @@ class Claude:
             kw["model"] = model
         if resume:
             kw["resume"] = resume
+        if env := login_env():
+            kw["env"] = env
         if connectors:
             extra = ("mcp__daybreak__",) if sdk_servers else ()
             kw.update(
@@ -196,38 +235,42 @@ class Claude:
             signals: list[str] = []
             chunks: list[str] = []
             final, is_error = None, False
+
+            async def run() -> None:
+                nonlocal final, is_error
+                async with ClaudeSDKClient(options=opts) as client:
+                    if connectors:
+                        await self.wait_for_connectors(client)
+                    await client.query(prompt)
+                    async for msg in client.receive_response():
+                        if isinstance(msg, SystemMessage) and msg.subtype in ("api_retry", "error", "init_error"):
+                            signals.append(f"{msg.subtype}: {msg.data}")
+                        elif isinstance(msg, AssistantMessage):
+                            for b in msg.content:
+                                if isinstance(b, TextBlock):
+                                    chunks.append(b.text)
+                                elif isinstance(b, ToolUseBlock):
+                                    log.info("[%s] tool %s", label, b.name)
+                        elif isinstance(msg, ResultMessage):
+                            final = msg.result or final
+                            is_error = bool(msg.is_error)
+
             try:
-                async with asyncio.timeout(timeout):
-                    async with ClaudeSDKClient(options=opts) as client:
-                        if connectors:
-                            await self.wait_for_connectors(client)
-                        await client.query(prompt)
-                        async for msg in client.receive_response():
-                            if isinstance(msg, SystemMessage) and msg.subtype in ("api_retry", "error", "init_error"):
-                                signals.append(f"{msg.subtype}: {msg.data}")
-                            elif isinstance(msg, AssistantMessage):
-                                for b in msg.content:
-                                    if isinstance(b, TextBlock):
-                                        chunks.append(b.text)
-                                    elif isinstance(b, ToolUseBlock):
-                                        log.info("[%s] tool %s", label, b.name)
-                            elif isinstance(msg, ResultMessage):
-                                final = msg.result or final
-                                is_error = bool(msg.is_error)
+                await within(timeout, run())
             except Exception as e:
                 self.stats["errors"] += 1
                 detail = f"{e} {signals[-3:]}"
                 if AUTH_ERROR.search(detail):
-                    self._report_auth(False, str(e))
+                    self.report_auth(False, str(e))
                 raise RuntimeError(f"Claude call '{label}' failed: {e}; signals={signals[-3:]}") from e
             finally:
                 self.stats["seconds"] += time.monotonic() - t0
             if is_error:
                 self.stats["errors"] += 1
                 if AUTH_ERROR.search(final or ""):
-                    self._report_auth(False, final or "")
+                    self.report_auth(False, final or "")
                 raise RuntimeError(f"Claude call '{label}' returned an error: {final}")
-            self._report_auth(True)
+            self.report_auth(True)
             log.info("[%s] done in %.1fs", label, time.monotonic() - t0)
             return (final or "".join(chunks)).strip()
 
@@ -240,6 +283,27 @@ class Claude:
                 raise  # don't repeat tool-using work; caller treats as empty
             retry = await self.complete(system, prompt + "\n\nReturn ONLY valid JSON this time — no prose.", **kw)
             return parse_jsonl(retry) if jsonl else parse_json(retry)
+
+
+async def within(seconds: float, coro) -> Any:
+    """Await coro, giving up after `seconds` on the wall clock.
+
+    asyncio's own timeouts run on a clock that stops while a Mac sleeps, so a call could sit through hours of sleep
+    and then carry on with a stale sign-in. This one counts the sleep too."""
+    task = asyncio.ensure_future(coro)
+    deadline = time.time() + seconds
+    try:
+        while True:
+            done, _ = await asyncio.wait({task}, timeout=min(5.0, max(0.05, deadline - time.time())))
+            if done:
+                return task.result()
+            if time.time() >= deadline:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+                raise TimeoutError(f"no answer within {int(seconds)}s")
+    except asyncio.CancelledError:
+        task.cancel()
+        raise
 
 
 async def stream_text(client: ClaudeSDKClient) -> AsyncIterator[dict]:

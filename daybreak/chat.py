@@ -10,7 +10,7 @@ from typing import AsyncIterator
 from claude_agent_sdk import ClaudeSDKClient, create_sdk_mcp_server, tool
 
 from . import artifacts, prompts
-from .claude import Claude, stream_text
+from .claude import AUTH_ERROR, Claude, auth_fix, stream_text
 from .db import new_id
 
 log = logging.getLogger("daybreak.chat")
@@ -160,16 +160,23 @@ class ChatManager:
                             answer.append(ev["result"])
                             yield {"type": "text", "text": ev["result"]}
                         continue
+                    if ev["type"] == "error" and AUTH_ERROR.search(ev["text"]):
+                        ev = self._signed_out(ev["text"])
+                        await self._close(chat_id)  # the next message starts fresh with the new sign-in
                     yield ev
             except Exception as e:
                 log.exception("chat failed")
                 await self._close(chat_id)
-                yield {"type": "error", "text": f"Chat failed: {e}"}
+                yield self._signed_out(str(e)) if AUTH_ERROR.search(str(e)) else {"type": "error", "text": f"Chat failed: {e}"}
         text = "".join(answer)
         db.x("INSERT INTO chat_messages(chat_id, role, content, meta, created) VALUES(?,?,?,?,?)",
              (chat_id, "assistant", text, json.dumps({"tools": tools_used}), time.time()))
         yield {"type": "done", "chat_id": chat_id}
         asyncio.create_task(self._note(chat_id, message, text))
+
+    def _signed_out(self, message: str) -> dict:
+        self.app.claude.report_auth(False, message)
+        return {"type": "error", "text": "Claude needs you to sign in again. " + auth_fix().replace("`", "")}
 
     async def _note(self, chat_id: str, question: str, answer: str) -> None:
         """Feed work-relevant chat intent into the ledger, so assistant chats count as work signals too."""

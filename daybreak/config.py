@@ -2,7 +2,7 @@
 
 Everything Daybreak stores lives in one folder (macOS: ~/Library/Application Support/Daybreak, Linux:
 ~/.local/share/daybreak, Windows: %LOCALAPPDATA%\\Daybreak): config.toml, daybreak.db, token, artifacts/,
-paintings/, logs/.
+paintings/, logs/, and claude/ (Daybreak's own Claude sign-in, from `daybreak login`).
 """
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ TOKEN_PATH = DATA_DIR / "token"
 ARTIFACTS_DIR = DATA_DIR / "artifacts"
 PAINTINGS_DIR = DATA_DIR / "paintings"
 LOG_DIR = DATA_DIR / "logs"
+CLAUDE_DIR = DATA_DIR / "claude"  # Daybreak's own Claude Code sign-in (`daybreak login`), kept apart from yours
 
 DEFAULT_PORT = 47821
 EXTENSION_ID = "hkdpeghplcpifmffofnnhlkbiookfefo"  # fixed by the "key" in extension/manifest.json

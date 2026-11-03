@@ -98,17 +98,29 @@ python3 -m venv .venv && .venv/bin/pip install -e .
 .venv/bin/daybreak install
 ```
 
-`install` does four things:
+`install` does five things:
 
 - copies Daybreak into its own environment in your data folder
 - copies the extension there too
 - registers it with every Chromium browser it finds (Chrome, Edge, Brave, Arc, Dia, Vivaldi, Opera, Chromium)
 - starts the helper at login: a launchd agent on macOS, a systemd user service on Linux
+- links `daybreak` into `~/.local/bin`, if you have one, so you can run it from anywhere
 
-**2. Load the extension.** Open `chrome://extensions` (or `edge://`, `brave://`), turn on *Developer mode*, choose
+**2. Give Daybreak its own sign-in**
+
+```bash
+.venv/bin/daybreak login
+```
+
+A browser window opens. Sign in with the Claude account you use for Claude Code. Daybreak keeps this sign-in to
+itself, so its background work can never log your terminal out, and logging in or out in your terminal never stops
+Daybreak. (You can skip this step, and Daybreak will borrow your terminal's sign-in instead. It works, but if one of
+its background calls refreshes a stale copy of the shared login, Claude signs you out everywhere.)
+
+**3. Load the extension.** Open `chrome://extensions` (or `edge://`, `brave://`), turn on *Developer mode*, choose
 *Load unpacked*, and pick the folder `install` printed. Keep the new-tab page when the browser asks.
 
-**3. That's it.** If it's a weekday, your first brief shows up within a few minutes; otherwise it arrives on the next
+**4. That's it.** If it's a weekday, your first brief shows up within a few minutes; otherwise it arrives on the next
 weekday morning. You can also run `.venv/bin/daybreak brief` and open a new tab.
 
 If the extension says it can't find the helper, run `daybreak pair` and paste the output into the extension's
@@ -169,6 +181,7 @@ If your workspace allows it, you can switch to the claude.ai Slack connector in 
 | `daybreak prep [meeting-id\|next]` | write prep notes for a meeting |
 | `daybreak status` | show what the helper is up to |
 | `daybreak pair` | print pairing details for the extension's settings page |
+| `daybreak login` | give Daybreak its own Claude sign-in, separate from your terminal's |
 | `daybreak install` / `uninstall` | set up or remove the login service and browser registration |
 
 Settings live in `config.toml` in the data folder. You can change the brief time, work hours, pop-up timing, sources

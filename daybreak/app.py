@@ -11,7 +11,7 @@ from . import config, osutil, prompts
 from .bridge import Bridge
 from .brief import Brief
 from .chat import ChatManager
-from .claude import Claude, scrub_host_env
+from .claude import Claude, auth_fix, scrub_host_env
 from .db import DB
 from .meetings import Meetings
 from .pipeline import Pipeline
@@ -19,8 +19,6 @@ from .scheduled import Schedules
 from .sensors import Sensors
 
 log = logging.getLogger("daybreak")
-
-AUTH_FIX = "Open Terminal, run `claude`, then type /login. Daybreak picks the new sign-in up on its own."
 
 
 class App:
@@ -56,8 +54,8 @@ class App:
         if now - state["alerted"] > 3 * 3600:  # tell the user now, then at most every 3 hours while it stays broken
             state["alerted"] = now
             log.warning("Claude sign-in failed: %s", message[:200])
-            osutil.notify("Daybreak", "Claude sign-in expired", AUTH_FIX.replace("`", ""))
-            nid = self.db.add_nudge("auth", "Claude sign-in expired", AUTH_FIX, {}, ttl=3 * 3600, dedupe=f"auth:{int(now)}")
+            osutil.notify("Daybreak", "Claude sign-in expired", auth_fix().replace("`", ""))
+            nid = self.db.add_nudge("auth", "Claude sign-in expired", auth_fix(), {}, ttl=3 * 3600, dedupe=f"auth:{int(now)}")
             if nid:  # the desktop notification already went out; don't send a second one from the fallback loop
                 self.db.x("UPDATE nudges SET os_notified = 1 WHERE id = ?", (nid,))
         self.db.put("claude_auth", state)
@@ -244,5 +242,5 @@ class App:
             "slack_workspaces": self.db.get("slack_workspaces", []),
             "brief_time": datetime.now().replace(hour=self.cfg.brief_time[0], minute=self.cfg.brief_time[1]).strftime("%-I:%M %p"),
             "brief_error": self.db.get("brief_error"), "claude": self.claude.stats,
-            "claude_auth": self.db.get("claude_auth") or {"ok": True}, "auth_fix": AUTH_FIX,
+            "claude_auth": self.db.get("claude_auth") or {"ok": True}, "auth_fix": auth_fix(),
         }
