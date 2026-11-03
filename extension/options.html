@@ -56,6 +56,16 @@
   </section>
 
   <section class="card">
+    <h2>Model</h2>
+    <label for="model">For the brief, meeting prep and chat</label>
+    <select id="model"><option value="">Loading the models your Claude account offers…</option></select>
+    <label for="model_fast">For reading your sources and sorting them, every half hour</label>
+    <select id="model_fast"><option value="">Same as above</option></select>
+    <p class="muted" id="model-note">A smaller model for the background reading uses less of your subscription.</p>
+    <button id="save-model">Save</button> <span id="saved-model" class="muted"></span>
+  </section>
+
+  <section class="card">
     <h2>Sources</h2>
     <ul id="sources" class="muted"></ul>
     <p class="muted">Gmail, Drive, Jira/Confluence, Google Calendar and Slack connectors are the ones connected to your Claude account

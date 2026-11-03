@@ -164,6 +164,15 @@ AUTH_ERROR = re.compile(r"failed to authenticate|oauth session expired|could not
                         r"invalid (?:authentication|bearer|api key)|please run /login|\b401\b", re.I)
 
 
+# Shown when the CLI can't be asked (offline, signed out); the aliases always resolve to the latest of each family.
+FALLBACK_MODELS = [
+    {"value": "", "name": "Default", "description": "Your Claude Code default"},
+    {"value": "opus", "name": "Opus", "description": "Latest Opus"},
+    {"value": "sonnet", "name": "Sonnet", "description": "Latest Sonnet"},
+    {"value": "haiku", "name": "Haiku", "description": "Latest Haiku"},
+]
+
+
 class Claude:
     def __init__(self, cfg: Config, *, concurrency: int = 3, on_auth: Callable[[bool, str], None] | None = None):
         self.cfg = cfg
@@ -205,6 +214,26 @@ class Claude:
         else:
             kw.update(setting_sources=[], tools=[], allowed_tools=[], permission_mode="bypassPermissions")
         return ClaudeAgentOptions(**kw)
+
+    async def list_models(self) -> list[dict]:
+        """The models this Claude account can use, as the CLI reports them (cached for a few hours)."""
+        cached, at = getattr(self, "_models", (None, 0.0))
+        if cached and time.time() - at < 6 * 3600:
+            return cached
+        try:
+            async def ask() -> dict:
+                async with ClaudeSDKClient(options=self.options(system="", connectors=False)) as client:
+                    return await client.get_server_info() or {}
+            info = await within(60, ask())
+            models = [{"value": "" if m.get("value") == "default" else m["value"], "name": m.get("displayName") or m["value"],
+                       # API prices mean nothing on a subscription; the CLI adds them when it isn't signed in
+                       "description": re.sub(r"\s*·\s*\$[\d.]+/\$[\d.]+ per Mtok", "", m.get("description", ""))}
+                      for m in info.get("models") or [] if m.get("value")]
+        except Exception as e:
+            log.warning("couldn't list models: %s", e)
+            return FALLBACK_MODELS
+        self._models = (models, time.time())
+        return models
 
     @staticmethod
     async def wait_for_connectors(client: ClaudeSDKClient, timeout: float = 15) -> dict[str, str]:

@@ -6,6 +6,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import time
 from pathlib import Path
 
@@ -216,18 +217,29 @@ def make_app(app: App) -> web.Application:
     async def get_settings(_r):
         c = app.cfg
         return ok(name=c.name, brief_time="%02d:%02d" % c.brief_time, slack=c.slack, slack_workspace=c.slack_workspace,
-                  config_path=str(config.CONFIG_PATH))
+                  model=c.model_default, model_fast=c.model_fast, config_path=str(config.CONFIG_PATH))
+
+    @routes.get("/api/models")
+    async def models(_r):
+        return ok(await app.claude.list_models())
 
     @routes.post("/api/settings")
     async def set_settings(r):
         body = await r.json()
         mapping = {"name": ("user", "name"), "brief_time": ("schedule", "brief_time"),
-                   "slack": ("sources", "slack"), "slack_workspace": ("sources", "slack_workspace")}
+                   "slack": ("sources", "slack"), "slack_workspace": ("sources", "slack_workspace"),
+                   "model": ("models", "default"), "model_fast": ("models", "fast")}
+        for key in ("model", "model_fast"):
+            if key in body and not re.fullmatch(r"[A-Za-z0-9._\-\[\]]{0,80}", str(body[key]).strip()):
+                return ok(ok=False, error=f"{body[key]!r} isn't a model name")
+        before = (app.cfg.model_default, app.cfg.model_fast)
         for key, (section, field) in mapping.items():
             if key in body:
                 config.set_value(section, field, str(body[key]).strip())
         fresh = config.load()
         app.cfg.__dict__.update(fresh.__dict__)  # every component holds the same Config object
+        if (app.cfg.model_default, app.cfg.model_fast) != before:
+            await app.chat.close_all()  # open chats switch to the new model on their next message
         return ok(ok=True)
 
     @routes.get("/a/{id}/{sig}")

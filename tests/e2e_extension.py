@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 import urllib.request
 import uuid
 from pathlib import Path
@@ -139,6 +140,25 @@ def run(home: Path):
         brief_tab.wait_for_load_state()
         check("side panel's Brief button opens the brief", brief_tab.url.endswith("/newtab.html"))
         panel.screenshot(path=str(OUT / "sidepanel.png"))
+
+        settings = ctx.new_page()
+        settings.goto(f"chrome-extension://{ext_id}/options.html")
+        values = []
+        for _ in range(90):  # extension pages forbid the eval that wait_for_function uses, so poll
+            values = settings.evaluate("[...document.querySelectorAll('#model option')].map(o => o.value)")
+            if len(values) > 1:
+                break
+            time.sleep(1)
+        choice = "sonnet" if "sonnet" in values else next(v for v in values if v)
+        settings.select_option("#model", choice)
+        settings.click("#save-model")
+        for _ in range(20):
+            if settings.evaluate("document.getElementById('saved-model').textContent").startswith("Saved"):
+                break
+            time.sleep(0.5)
+        saved = tomllib.loads((home / "config.toml").read_text())["models"]["default"]
+        check("settings lists the models and saves the choice", saved == choice, f"{len(values)} options, saved {saved!r}")
+        settings.screenshot(path=str(OUT / "settings.png"), full_page=True)
         ctx.close()
 
 

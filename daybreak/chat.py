@@ -120,6 +120,10 @@ class ChatManager:
             except Exception:
                 pass
 
+    async def close_all(self) -> None:
+        for cid in list(self.sessions):
+            await self._close(cid)
+
     async def reap(self) -> None:
         for cid, s in list(self.sessions.items()):
             if time.time() - s["used"] > IDLE_SECONDS and not s["lock"].locked():

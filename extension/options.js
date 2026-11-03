@@ -39,6 +39,32 @@ async function refresh() {
   }
 }
 
+// The model pickers list what the helper's Claude account offers: the family aliases (always the latest version)
+// first, then specific versions. A value set by hand in config.toml that isn't on the list stays selectable.
+async function loadModels() {
+  const [models, settings] = await Promise.all([api("/api/models"), api("/api/settings")]);
+  const fill = (select, current, blankLabel) => {
+    const opt = (m) => `<option value="${esc(m.value)}">${esc(m.name)}${m.description ? " · " + esc(m.description) : ""}</option>`;
+    const blank = models.find((m) => m.value === "");
+    const named = models.filter((m) => m.value);
+    const aliases = named.filter((m) => !m.value.startsWith("claude-"));
+    const pinned = named.filter((m) => m.value.startsWith("claude-"));
+    let html = `<option value="">${esc(blankLabel(blank))}</option>` + aliases.map(opt).join("");
+    if (pinned.length) html += `<optgroup label="Specific versions">${pinned.map(opt).join("")}</optgroup>`;
+    if (current && !named.some((m) => m.value === current)) html += `<option value="${esc(current)}">${esc(current)} · from config.toml</option>`;
+    select.innerHTML = html;
+    select.value = current || "";
+  };
+  fill($("model"), settings.model, (b) => `Claude Code default${b?.description ? " · " + b.description : ""}`);
+  fill($("model_fast"), settings.model_fast, () => "Same as above");
+}
+
+$("save-model").onclick = async () => {
+  const r = await post("/api/settings", { model: $("model").value, model_fast: $("model_fast").value });
+  $("saved-model").textContent = r.ok === false ? r.error : "Saved. The next brief, prep and chat message use it.";
+  setTimeout(() => ($("saved-model").textContent = ""), 4000);
+};
+
 $("repair").onclick = async () => {
   try { await chrome.storage.local.remove("pairing"); await pair(); } catch (e) { $("conn").innerHTML = `<span class="bad">${esc(e.message)}</span>`; return; }
   refresh();
@@ -62,3 +88,4 @@ $("save").onclick = async () => {
 };
 
 refresh();
+loadModels().catch((e) => ($("model-note").textContent = `Couldn't list models: ${e.message}`));

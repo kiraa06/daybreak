@@ -185,7 +185,8 @@ If your workspace allows it, you can switch to the claude.ai Slack connector in 
 | `daybreak install` / `uninstall` | set up or remove the login service and browser registration |
 
 Settings live in `config.toml` in the data folder. You can change the brief time, work hours, pop-up timing, sources
-and models there. The data folder is:
+and models there. The everyday ones (your name, the brief time, Slack, and which Claude model to use) are also on the
+extension's settings page, where the model list shows exactly what your Claude account offers. The data folder is:
 
 - macOS: `~/Library/Application Support/Daybreak`
 - Linux: `~/.local/share/daybreak`

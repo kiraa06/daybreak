@@ -6,6 +6,7 @@ paintings/, logs/, and claude/ (Daybreak's own Claude sign-in, from `daybreak lo
 """
 from __future__ import annotations
 
+import json
 import os
 import secrets
 import tomllib
@@ -167,7 +168,7 @@ def set_value(section: str, key: str, value: str) -> None:
             comment = ""
             if "#" in line.split("=", 1)[1]:
                 comment = "  #" + line.split("#", 1)[1]
-            line = f'{key} = "{value}"{comment}'
+            line = f"{key} = {json.dumps(value, ensure_ascii=False)}{comment}"  # JSON escapes are valid TOML
             done = True
         out.append(line)
     if not done:
