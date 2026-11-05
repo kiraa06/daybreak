@@ -11,7 +11,7 @@ from . import config, osutil, prompts
 from .bridge import Bridge
 from .brief import Brief
 from .chat import ChatManager
-from .claude import Claude, auth_fix, scrub_host_env
+from .claude import Claude, SleptThrough, auth_fix, awake_for, note_time, scrub_host_env, slept_since
 from .db import DB
 from .meetings import Meetings
 from .pipeline import Pipeline
@@ -19,6 +19,8 @@ from .scheduled import Schedules
 from .sensors import Sensors
 
 log = logging.getLogger("daybreak")
+
+SETTLE_SECONDS = 120  # background work waits this long after a wake, so a lid-closed "dark wake" never starts any
 
 
 class App:
@@ -90,6 +92,10 @@ class App:
                 pipe = await Pipeline(self.cfg, self.db, self.claude, self.me).run()
                 await self.proactive(started)
                 result = {"sources": sources, **pipe, "seconds": round(time.time() - started)}
+                if slept_since(started):  # the computer slept through part of it; go again once it's awake
+                    log.info("sense cycle (%s) was interrupted by sleep: %s", reason, result)
+                    self.db.run_end(run, "interrupted", json.dumps(result))
+                    return result
                 self.db.put("last_sense", started)
                 self.db.put("last_sense_result", result)
                 self.db.run_end(run, "ok", json.dumps(result))
@@ -103,7 +109,10 @@ class App:
                 self.activity.pop("sense", None)
 
     async def refresh_calendar(self) -> None:
+        started = time.time()
         n = await self.sensors.calendar()
+        if n < 0 and slept_since(started):
+            return  # cut short by sleep, not a calendar problem; try again once awake
         self.db.put("last_calendar", time.time())
         status = self.db.get("source_status", {}) or {}
         status["calendar"] = {"ok": n >= 0, "added": max(n, 0), "at": time.time(),
@@ -129,6 +138,10 @@ class App:
                                   {"open": "newtab"}, deliver_at=ready_at, ttl=4 * 3600, dedupe=f"brief:{now.date()}")
                 self.db.run_end(run, "ok")
                 return data
+            except SleptThrough as e:
+                log.info("brief interrupted: %s", e)  # no back-off: it's written as soon as the computer is awake
+                self.db.run_end(run, "interrupted", str(e))
+                return None
             except Exception as e:
                 log.exception("brief failed")
                 self.db.run_end(run, "failed", str(e))
@@ -171,14 +184,19 @@ class App:
                               ttl=3 * 3600, dedupe=f"followup:{ev['ref']}:{ev['kind']}")
 
     # -- loops -------------------------------------------------------------------
-    async def _loop(self, name: str, every: float, fn) -> None:
+    async def _loop(self, name: str, every: float, fn, *, settled: bool = False) -> None:
+        """Run fn every `every` seconds; with settled=True, only once the computer has been awake a while."""
         await asyncio.sleep(2)
         while True:
             try:
-                await fn()
+                if not settled or awake_for() >= SETTLE_SECONDS:
+                    await fn()
             except Exception:
                 log.exception("loop %s failed", name)
             await asyncio.sleep(every)
+
+    async def _clock_tick(self) -> None:
+        note_time()  # notices a wake within seconds, before any other loop starts work
 
     async def _sense_tick(self) -> None:
         if not self.in_work_hours() or self.brief_lock.locked():
@@ -221,10 +239,11 @@ class App:
 
     def start(self) -> None:
         self.tasks = [
-            asyncio.create_task(self._loop("sense", 60, self._sense_tick)),
-            asyncio.create_task(self._loop("brief", 60, self._brief_tick)),
-            asyncio.create_task(self._loop("meetings", 60, self._meeting_tick)),
-            asyncio.create_task(self._loop("schedules", 30, self.schedules.tick)),
+            asyncio.create_task(self._loop("clock", 5, self._clock_tick)),
+            asyncio.create_task(self._loop("sense", 60, self._sense_tick, settled=True)),
+            asyncio.create_task(self._loop("brief", 60, self._brief_tick, settled=True)),
+            asyncio.create_task(self._loop("meetings", 60, self._meeting_tick, settled=True)),
+            asyncio.create_task(self._loop("schedules", 30, self.schedules.tick, settled=True)),
             asyncio.create_task(self._loop("os-notify", 30, self._os_notify_tick)),
             asyncio.create_task(self._loop("chat-reap", 300, self.chat.reap)),
         ]

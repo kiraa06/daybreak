@@ -87,6 +87,37 @@ def auth_fix() -> str:
     return f"Open Terminal and run `{daybreak_command()} login`. Daybreak picks the new sign-in up on its own."
 
 
+# --- sleep ---------------------------------------------------------------------
+# A Mac with its lid closed still wakes for about 45 seconds every quarter hour ("dark wakes"). Work started then is
+# cut off when it sleeps again, so background work waits until the Mac has been awake for a while, and a call that
+# sleep cut short isn't blamed on the source it was reading.
+
+_clock = {"seen": time.time(), "woke": time.time()}
+
+
+def note_time() -> None:
+    """Call every few seconds while running; a long gap since the last call means the computer slept."""
+    now = time.time()
+    if now - _clock["seen"] > 30:
+        _clock["woke"] = now
+    _clock["seen"] = now
+
+
+def awake_for() -> float:
+    """Seconds since the computer last woke up (or the helper started)."""
+    note_time()
+    return time.time() - _clock["woke"]
+
+
+def slept_since(t: float) -> bool:
+    note_time()
+    return _clock["woke"] > t
+
+
+class SleptThrough(RuntimeError):
+    """A Claude call cut short because the computer went to sleep, not because anything is broken."""
+
+
 # --- permission gate ---------------------------------------------------------
 
 _READ_VERBS = {"search", "get", "list", "read", "fetch", "find", "lookup", "query", "download",
@@ -284,9 +315,12 @@ class Claude:
                             final = msg.result or final
                             is_error = bool(msg.is_error)
 
+            started = time.time()
             try:
                 await within(timeout, run())
             except Exception as e:
+                if slept_since(started):
+                    raise SleptThrough(f"Claude call '{label}' was cut short because the computer went to sleep") from e
                 self.stats["errors"] += 1
                 detail = f"{e} {signals[-3:]}"
                 if AUTH_ERROR.search(detail):
@@ -324,6 +358,7 @@ async def within(seconds: float, coro) -> Any:
     try:
         while True:
             done, _ = await asyncio.wait({task}, timeout=min(5.0, max(0.05, deadline - time.time())))
+            note_time()
             if done:
                 return task.result()
             if time.time() >= deadline:

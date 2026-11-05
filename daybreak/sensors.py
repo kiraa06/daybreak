@@ -20,7 +20,7 @@ import aiohttp
 
 from . import prompts
 from .bridge import Bridge
-from .claude import Claude
+from .claude import Claude, slept_since
 from .config import Config
 from .db import DB, new_id
 
@@ -271,6 +271,7 @@ class Sensors:
 
     # -- all -------------------------------------------------------------------
     async def run_all(self, hours: int = 12) -> dict[str, int]:
+        started = time.time()
         await self.learn_identity()
         jobs = {}
         if self.cfg.gmail:
@@ -290,6 +291,8 @@ class Sensors:
                 log.warning("sensor %s crashed: %s", k, r)
         status = self.db.get("source_status", {}) or {}
         for k, v in out.items():
+            if v < 0 and slept_since(started):
+                continue  # cut short by sleep, not the source's fault: keep its last status
             status[k] = {"ok": v >= 0, "added": max(v, 0), "at": time.time()}
         self.db.put("source_status", status)
         return out

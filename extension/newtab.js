@@ -279,5 +279,17 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 });
 
+// Keep the footer's source status current while the tab stays open (it's otherwise drawn once, at load).
+async function refreshStatus() {
+  if (document.visibilityState !== "visible" || $("brief").hidden) return;
+  try {
+    const st = await api("/api/state");
+    $("status").textContent = statusLine(st);
+    authWarning(st);
+  } catch { /* the helper is restarting; try again next time */ }
+}
+document.addEventListener("visibilitychange", refreshStatus);
+
 setInterval(tickClock, 15_000);
+setInterval(refreshStatus, 60_000);
 load();

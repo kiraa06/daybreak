@@ -8,7 +8,7 @@ import time
 from datetime import datetime
 
 from . import artifacts, prompts
-from .claude import Claude
+from .claude import Claude, SleptThrough
 from .config import Config
 from .db import DB
 
@@ -66,6 +66,10 @@ class Meetings:
                 prompts.fill(prompts.MEETING_PREP, me=self.me_fn(), now=self.cfg.now().isoformat(timespec="minutes"),
                              meeting=meeting_text, context=self._related_context(m)),
                 connectors=True, max_turns=14, label=f"prep:{m['title'][:30]}")
+        except SleptThrough as e:
+            log.info("prep interrupted for %s: %s", m["title"], e)
+            self.db.x("UPDATE meetings SET prep_state = '' WHERE id = ?", (meeting_id,))  # try again once awake
+            return None
         except Exception as e:
             log.warning("prep failed for %s: %s", m["title"], e)
             self.db.x("UPDATE meetings SET prep_state = 'failed' WHERE id = ?", (meeting_id,))
