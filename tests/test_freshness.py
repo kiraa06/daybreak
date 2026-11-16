@@ -44,12 +44,28 @@ class FakeClaude:
         return answer(prompt) if callable(answer) else answer
 
 
-def event(db, ref, source, kind, text, ago, *, author="Ada Lovelace", target="me", title=""):
+class FakeBridge:
+    """Stands in for the browser extension: answers a Slack thread re-read with one canned reply per thread."""
+
+    def __init__(self):
+        self.online, self.asked = True, []
+
+    def extension_online(self):
+        return self.online
+
+    async def request(self, kind, params, timeout=120):
+        self.asked.append((kind, params))
+        return {"threads": [{"ref": ref, "messages": [{"user": "Grace Hopper", "at": "2026-01-05T09:00:00Z",
+                                                       "text": f"Sorted, nothing left to do on {ref[-3:]}."}]}
+                            for ref in params["refs"]]}
+
+
+def event(db, ref, source, kind, text, ago, *, author="Ada Lovelace", target="me", title="", url=""):
     ts = time.time() - ago
     db.x("INSERT INTO events(id, source, ref, kind, author, target, text, url, ts, created, routed, fingerprint) "
-         "VALUES(?,?,?,?,?,?,?,?,?,?,1,?)", (new_id(), source, ref, kind, author, target, text, "", ts, ts, new_id()))
-    db.x("INSERT INTO items(ref, source, title, state, updated) VALUES(?,?,?,?,?) ON CONFLICT(ref) DO UPDATE SET "
-         "updated = excluded.updated", (ref, source, title or ref, "seen", ts))
+         "VALUES(?,?,?,?,?,?,?,?,?,?,1,?)", (new_id(), source, ref, kind, author, target, text, url, ts, ts, new_id()))
+    db.x("INSERT INTO items(ref, source, title, state, url, updated) VALUES(?,?,?,?,?,?) ON CONFLICT(ref) DO UPDATE SET "
+         "updated = excluded.updated", (ref, source, title or ref, "seen", url, ts))
 
 
 def workstream(db, slug, title, overview, *, state="active", loops=(), synthesized_ago=0.0, refs=()):
@@ -60,11 +76,22 @@ def workstream(db, slug, title, overview, *, state="active", loops=(), synthesiz
         db.x("INSERT INTO memberships(slug, ref, conf, added) VALUES(?,?,0.9,?)", (slug, ref, now))
 
 
-def todo(db, day, text, *, done=0, slug="", since="", loop=""):
+def todo(db, day, text, *, done=0, slug="", since="", loop="", url=""):
     tid = new_id()
-    db.x("INSERT INTO todos(id, day, text, detail, slug, done, done_at, since, loop) VALUES(?,?,?,?,?,?,?,?,?)",
-         (tid, day, text, "", slug, done, time.time() - DAY if done else 0, since, loop))
+    db.x("INSERT INTO todos(id, day, text, detail, slug, done, done_at, since, loop, source) VALUES(?,?,?,?,?,?,?,?,?,?)",
+         (tid, day, text, "", slug, done, time.time() - DAY if done else 0, since, loop, json.dumps({"url": url})))
     return tid
+
+
+def claims_of(prompt):
+    """Each claim in a re-check prompt, with the indented lines that belong to it."""
+    out = []
+    for line in prompt.split("CLAIMS")[1].splitlines():
+        if line.startswith("- ["):
+            out.append(line)
+        elif out and line.startswith("    "):
+            out[-1] += "\n" + line
+    return out
 
 
 async def main():
@@ -88,8 +115,12 @@ async def main():
                "since": iso(1)}
     invoice = {"kind": "commitment", "who": "me", "to": "Ada Lovelace", "text": "Send the invoice sample",
                "since": iso(2)}
+    event(db, "slack:T1:C1:111.111", "slack", "request", "Can you review the cutover checklist?", 2 * DAY)
     workstream(db, "billing-migration", "Billing Migration", "Moving invoices to the new ledger.",
-               synthesized_ago=2 * 3600, refs=("jira:BILL-7",), loops=[cutover, invoice])
+               synthesized_ago=2 * 3600, refs=("jira:BILL-7", "slack:T1:C1:111.111"), loops=[cutover, invoice])
+    # A Slack ask that belongs to no workstream; its to-do only has the link.
+    room = "https://example.slack.com/archives/C2/p222222"
+    event(db, "slack:T1:C2:222.222", "slack", "request", "Please book the rehearsal room.", 2 * DAY, url=room)
 
     # --- workstreams --------------------------------------------------------------------------------------------
     claude.answers["synth"] = {"title": "Billing Migration", "overview": "Cutover checklist is out for review.",
@@ -112,7 +143,8 @@ async def main():
 
     # --- to-dos -------------------------------------------------------------------------------------------------
     tid = todo(db, iso(1), "Send the invoice sample to Ada", slug="billing-migration", loop=loop_id(invoice["text"]))
-    brief = Brief(cfg, db, claude, lambda: "Ada Lovelace")
+    bridge = FakeBridge()
+    brief = Brief(cfg, db, claude, lambda: "Ada Lovelace", bridge)
     brief.mark_todo(tid, True)
     ws = db.one("SELECT open_loops, closed FROM workstreams WHERE slug = 'billing-migration'")
     check("ticking a to-do closes its open loop",
@@ -128,7 +160,7 @@ async def main():
     db.x("INSERT INTO surface(day, slugs, updated) VALUES(?,?,?) ON CONFLICT(day) DO UPDATE SET slugs = excluded.slugs",
          (today.date().isoformat(), json.dumps(["roster-clash", "billing-migration"]), time.time()))
     todo(db, iso(1), "Chase Grace about the old outage report", since=iso(12))
-    fresh = todo(db, iso(1), "Book the cutover rehearsal room", since=iso(2))
+    fresh = todo(db, iso(1), "Book the cutover rehearsal room", since=iso(2), url=room)
     db.put(f"painting:{today.date().isoformat()}", {"file": "x.jpg"})
     (config.PAINTINGS_DIR / f"{today.date().isoformat()}.jpg").write_bytes(b"x")
 
@@ -153,7 +185,19 @@ async def main():
     check("a loop the re-check found finished is closed before the brief is written",
           json.loads(ws["open_loops"]) == [] and "approved yesterday" in ws["closed"]
           and "approved yesterday" in prompt)
-    rows = db.all("SELECT text, since, done FROM todos WHERE day = ? ORDER BY position", (today.date().isoformat(),))
+    asked = bridge.asked[-1][1]["refs"] if bridge.asked else []
+    claims = {line.split("]")[0].strip("- ["): line for line in claims_of(claude.prompts["verify"][-1])}
+    loop_claim = next((c for c in claims.values() if "Review the cutover checklist" in c), "")
+    check("the re-check reads the Slack thread behind an open loop",
+          "slack:T1:C1:111.111" in asked and "nothing left to do on 111" in loop_claim, str(asked))
+    check("the re-check reads the Slack thread a carried to-do links to",
+          "slack:T1:C2:222.222" in asked and "nothing left to do on 222" in claims.get(f"T-{fresh[:6]}", ""))
+    rows = db.all("SELECT text, since, done, source FROM todos WHERE day = ? ORDER BY position", (today.date().isoformat(),))
+    check("a carried to-do keeps its link when the model leaves it out", rows and room in rows[0]["source"])
+    bridge.online, before = False, len(bridge.asked)
+    await brief.generate(today)
+    check("with the browser closed the brief is still written, without Slack", len(bridge.asked) == before
+          and "nothing left to do" not in claude.prompts["verify"][-1])
     texts = [r["text"] for r in rows]
     check("a to-do that matches one already ticked done is not raised again",
           texts == ["Book the cutover rehearsal room", "Draft the ledger rollback note"], str(texts))

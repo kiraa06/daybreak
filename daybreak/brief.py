@@ -24,6 +24,7 @@ CARRY_DAYS = 7      # an unfinished to-do is repeated this long at most, unless 
 DONE_DAYS = 14      # how far back "you already did this" reaches
 VERIFY_CLAIMS = 12  # how many open loops and carried to-dos are re-checked against their sources before writing
 VERIFY_CALLS = 8
+VERIFY_THREADS = 10  # Slack threads re-read through the browser for that re-check
 
 
 async def fetch_painting(db: DB, day: str) -> dict:
@@ -66,8 +67,8 @@ async def fetch_painting(db: DB, day: str) -> dict:
 
 
 class Brief:
-    def __init__(self, cfg: config.Config, db: DB, claude: Claude, me_fn):
-        self.cfg, self.db, self.claude, self.me_fn = cfg, db, claude, me_fn
+    def __init__(self, cfg: config.Config, db: DB, claude: Claude, me_fn, bridge=None):
+        self.cfg, self.db, self.claude, self.me_fn, self.bridge = cfg, db, claude, me_fn, bridge
 
     def _day_bounds(self, day: datetime) -> tuple[float, float]:
         start = day.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -164,9 +165,34 @@ class Brief:
                 out.append(r)
         return out[:30]
 
+    def _slack_refs(self, slug: str = "", url: str = "") -> list[str]:
+        """The Slack conversations behind a claim: the one its link points at, else its workstream's latest."""
+        row = self.db.one("SELECT ref FROM items WHERE source = 'slack' AND url = ?", (url,)) if url else None
+        if row:
+            return [row["ref"]]
+        return [r["ref"] for r in self.db.all(
+            "SELECT i.ref FROM items i JOIN memberships m ON m.ref = i.ref WHERE m.slug = ? AND i.source = 'slack' "
+            "ORDER BY i.updated DESC LIMIT 2", (slug,))] if slug else []
+
+    async def _slack_threads(self, refs: list[str]) -> dict[str, str]:
+        """What those Slack threads say right now, read by the extension through the browser's Slack session.
+        Empty when Slack isn't read that way or no browser is open; the claims then go unchecked."""
+        if not refs or self.cfg.slack != "browser" or not self.bridge or not self.bridge.extension_online():
+            return {}
+        result = await self.bridge.request("slack.threads", {"workspace": self.cfg.slack_workspace, "refs": refs}, timeout=75)
+        if not result or result.get("error"):
+            log.info("slack re-read skipped: %s", (result or {}).get("error", "the extension did not answer"))
+        out = {}
+        for t in (result or {}).get("threads") or []:
+            lines = [f"      {str(m.get('at', ''))[:16]} {m.get('user', '?')}: {str(m.get('text', ''))[:300]}"
+                     for m in (t.get("messages") or [])[-12:]]
+            if lines:
+                out[t.get("ref", "")] = "\n".join(lines)
+        return out
+
     async def _verify(self, surfaced: list[dict], carry: list[dict], today: datetime) -> dict:
         """Re-check open loops owed by the user and carried to-dos against their sources. Returns {claim id: verdict}."""
-        claims = []
+        claims = []  # (first recorded, claim line, Slack conversations behind it)
         for ws in surfaced:
             items = self.db.all("SELECT i.ref, i.title, i.state, i.url FROM items i JOIN memberships m ON m.ref = i.ref "
                                 "WHERE m.slug = ? ORDER BY i.updated DESC LIMIT 4", (ws["slug"],))
@@ -174,19 +200,23 @@ class Brief:
             for l in ws["loops"]:
                 if self._mine(l.get("who", "")):
                     claims.append((l.get("since") or "", f"- [L-{loop_id(l.get('text', ''))}] {l.get('text', '')} · workstream "
-                                   f"\"{ws['title']}\" · first recorded {l.get('since') or 'on an unknown date'} · {where}"))
+                                   f"\"{ws['title']}\" · first recorded {l.get('since') or 'on an unknown date'} · {where}",
+                                   self._slack_refs(ws["slug"])))
         for t in carry:
             url = (json.loads(t["source"] or "{}") or {}).get("url", "")
             claims.append((t["since"], f"- [{t['cid']}] {t['text']} ({t['detail']}) · a to-do carried from earlier "
-                           f"briefs · first recorded {t['since']} · {url}"))
+                           f"briefs · first recorded {t['since']} · {url}", self._slack_refs(t["slug"], url)))
         if not claims:
             return {}
-        claims.sort(key=lambda c: c[0])  # oldest first: those are the likeliest to be stale
+        claims = sorted(claims, key=lambda c: c[0])[:VERIFY_CLAIMS]  # oldest first: those are the likeliest to be stale
+        threads = await self._slack_threads(list(dict.fromkeys(r for c in claims for r in c[2]))[:VERIFY_THREADS])
+        lines = [c[1] + "".join(f"\n    Slack thread {r} right now:\n{threads[r]}" for r in c[2] if r in threads)
+                 for c in claims]
         try:
             data = await self.claude.complete_json(
                 prompts.fill(prompts.VERIFY_SYSTEM, me=self.me_fn()),
                 prompts.fill(prompts.VERIFY, me=self.me_fn(), now=today.strftime("%A %-d %B %Y, %H:%M"),
-                             claims="\n".join(c[1] for c in claims[:VERIFY_CLAIMS]), budget=VERIFY_CALLS),
+                             claims="\n".join(lines), budget=VERIFY_CALLS),
                 connectors=True, max_turns=VERIFY_CALLS + 6, fast=True, label="verify", timeout=420)
         except SleptThrough:
             raise
@@ -315,11 +345,15 @@ class Brief:
             loop = str(t.get("loop") or "").strip("[] ")
             origin = carried.get(str(t.get("carry") or "").strip("[] "))
             since = origin["since"] if origin else since_of.get(loop) or day_iso
+            source = t.get("source") if isinstance(t.get("source"), dict) else {}
+            if origin and not source.get("url"):  # a carried to-do keeps where it came from, so it can be re-checked
+                source = json.loads(origin["source"] or "{}")
             self.db.x("INSERT INTO todos(id, day, text, detail, slug, prompt, position, source, since, loop) "
                       "VALUES(?,?,?,?,?,?,?,?,?,?)",
-                      (new_id(), day_iso, text, str(t.get("detail", ""))[:400], str(t.get("workstream", ""))[:80],
-                       str(t.get("prompt", ""))[:400], position, json.dumps(t.get("source") or {})[:600], since,
-                       loop.removeprefix("L-")[:12]))
+                      (new_id(), day_iso, text, str(t.get("detail", ""))[:400],
+                       str(t.get("workstream") or (origin or {}).get("slug", ""))[:80],
+                       str(t.get("prompt", ""))[:400], position, json.dumps(source)[:600], since,
+                       (loop.removeprefix("L-") or (origin or {}).get("loop", ""))[:12]))
             position += 1
         return data
 

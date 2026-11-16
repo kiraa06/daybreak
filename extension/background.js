@@ -1,6 +1,6 @@
 // Daybreak service worker: polls the helper for pop-ups and browser jobs, shows toasts, wires up the side panel.
 import { api, post, askInPanel } from "./api.js";
-import { slackFetch } from "./slack.js";
+import { slackFetch, slackThreads } from "./slack.js";
 import { renderToast } from "./toast.js";
 import { BANNER_KINDS, browserInFront, clearBanner, listenForBannerClicks, showBanner } from "./banner.js";
 
@@ -62,6 +62,7 @@ async function runJob(job) {
   let result;
   try {
     if (job.kind === "slack.fetch") result = await slackFetch(job.params);
+    else if (job.kind === "slack.threads") result = await slackThreads(job.params);
     else result = { error: `unknown job ${job.kind}` };
   } catch (e) {
     result = { error: String(e?.message || e) };

@@ -6,6 +6,8 @@
 //   2. calls: multipart POSTs to https://<workspace>.slack.com/api/<method> with the token, like the web client —
 //      activity.feed (mentions inbox), client.counts (DMs with new messages), search.modules.messages (your own
 //      messages), conversations.history / conversations.replies, and edgeapi.slack.com/cache for names.
+//   3. re-reads: before the morning brief, the helper names the threads behind things it is about to remind you of,
+//      and slackThreads() reads just those again to see whether they have been answered.
 // Read-only methods only. Tokens stay in this browser (session storage); only normalized conversations go to the
 // local helper.
 
@@ -145,6 +147,20 @@ function cleanText(text, users) {
     .slice(0, 700);
 }
 
+// One conversation's recent messages, oldest first, without bot posts: a thread's replies, or a channel's latest.
+async function readMessages(api, c, { oldest, replies = 20 } = {}) {
+  const r = c.threadTs
+    ? await api.call("conversations.replies", { channel: c.channel, ts: c.threadTs, limit: replies }, "history-api/fetchReplies").catch(() => null)
+    : await api.call("conversations.history", { channel: c.channel, oldest, limit: 15 }, "history-api/fetchHistory").catch(() => null);
+  const msgs = (r?.messages || []).filter((m) => !m.bot_id && m.subtype !== "bot_message" && m.subtype !== "channel_join");
+  return c.threadTs ? msgs.slice(-15) : msgs.reverse().slice(-15);
+}
+
+const shape = (msgs, me, myName, users) => msgs.map((m, i) => ({
+  n: i + 1, user: m.user === me ? `${myName} (me)` : users.get(m.user) || m.user || "unknown",
+  text: cleanText(m.text, users), at: new Date(Number(m.ts) * 1000).toISOString(),
+}));
+
 // --- one workspace ---------------------------------------------------------------
 
 async function fetchWorkspace(s, oldest) {
@@ -212,13 +228,7 @@ async function fetchWorkspace(s, oldest) {
 
   // Read the most relevant conversations (bounded).
   const picks = [...wanted.values()].slice(0, 16);
-  const convos = await Promise.all(picks.map(async (c) => {
-    const r = c.threadTs
-      ? await api.call("conversations.replies", { channel: c.channel, ts: c.threadTs, limit: 20 }, "history-api/fetchReplies").catch(() => null)
-      : await api.call("conversations.history", { channel: c.channel, oldest, limit: 15 }, "history-api/fetchHistory").catch(() => null);
-    const msgs = (r?.messages || []).filter((m) => !m.bot_id && m.subtype !== "bot_message" && m.subtype !== "channel_join");
-    return { ...c, msgs: c.threadTs ? msgs.slice(-15) : msgs.reverse().slice(-15) };
-  }));
+  const convos = await Promise.all(picks.map(async (c) => ({ ...c, msgs: await readMessages(api, c, { oldest }) })));
 
   const userIds = new Set();
   const channelIds = new Set();
@@ -243,10 +253,7 @@ async function fetchWorkspace(s, oldest) {
           ? "group DM" : `#${names.channels.get(c.channel) || c.channel}`,
         why: [...c.reasons].join(", "),
         url: `${s.url}/archives/${c.channel}${c.threadTs ? "/p" + c.threadTs.replace(".", "") : ""}`,
-        messages: c.msgs.map((m, i) => ({
-          n: i + 1, user: m.user === me ? `${auth.user} (me)` : names.users.get(m.user) || m.user || "unknown",
-          text: cleanText(m.text, names.users), at: new Date(Number(m.ts) * 1000).toISOString(),
-        })),
+        messages: shape(c.msgs, me, auth.user, names.users),
       };
     }),
   };
@@ -279,4 +286,48 @@ export async function slackFetch(params) {
     workspaces,
     conversations: ok.flatMap((r) => r.conversations),
   };
+}
+
+// --- re-reading named threads -----------------------------------------------------
+
+async function threadsIn(s, wanted) {
+  const api = client(s);
+  const auth = await api.call("auth.test");
+  if (!auth.ok) return { error: `auth.test: ${auth.error}`, authError: AUTH_ERRORS.includes(auth.error) };
+  const read = await Promise.all(wanted.map(async (c) => ({ ...c, msgs: await readMessages(api, c, { replies: 100 }) })));
+  const userIds = new Set();
+  for (const c of read) {
+    for (const m of c.msgs) {
+      userIds.add(m.user);
+      for (const x of String(m.text || "").matchAll(MENTION)) userIds.add(x[1]);
+    }
+  }
+  const names = await resolveNames(api, userIds, []);
+  return { threads: read.filter((c) => c.msgs.length)
+    .map((c) => ({ ref: c.ref, messages: shape(c.msgs, auth.user_id, auth.user, names.users) })) };
+}
+
+// params.refs are conversation refs as slackFetch produced them: slack:<team>:<channel>:<thread ts | "channel">.
+// Returns what each says now, so the helper can tell whether something it is about to remind you of was answered.
+export async function slackThreads(params) {
+  const byTeam = new Map();
+  for (const ref of (params.refs || []).slice(0, 12)) {
+    const [kind, team, channel, thread] = String(ref).split(":");
+    if (kind !== "slack" || !team || !channel) continue;
+    if (!byTeam.has(team)) byTeam.set(team, []);
+    byTeam.get(team).push({ ref, channel, threadTs: thread && thread !== "channel" ? thread : null });
+  }
+  const run = async (list) => Promise.all(list.filter((s) => byTeam.has(s.teamId))
+    .map((s) => threadsIn(s, byTeam.get(s.teamId)).catch((e) => ({ error: String(e?.message || e) }))));
+
+  let list = await sessions(params.workspace);
+  if (!list.length) return { error: "Slack session not found — sign in to Slack once in this browser profile (app.slack.com)." };
+  let results = await run(list);
+  if (results.some((r) => r.authError)) {  // a token rotated: re-read localConfig_v2 once
+    list = await sessions(params.workspace, { fresh: true });
+    results = await run(list);
+  }
+  const threads = results.flatMap((r) => r.threads || []);
+  if (!threads.length && results.some((r) => r.error)) return { error: results.map((r) => r.error).filter(Boolean).join("; ") };
+  return { threads };
 }

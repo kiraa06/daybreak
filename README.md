@@ -165,6 +165,8 @@ already signed in with:
    isn't there yet, it opens Slack once in a background tab and lets Slack write it.
 2. It makes the same read-only calls the Slack web client makes: `activity.feed`, `client.counts`,
    `search.modules.messages` and `conversations.history`/`replies`, plus Slack's edge cache for names.
+3. Before the morning brief, it reads again the few threads behind things it is about to remind you of, to see whether
+   they were answered in the meantime. This needs a browser window open; without one, those reminders go unchecked.
 
 The token stays in your browser, and only the conversations it reads reach the helper on your computer. Two honest
 caveats:

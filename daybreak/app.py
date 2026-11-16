@@ -31,7 +31,7 @@ class App:
         self.claude = Claude(self.cfg, on_auth=self._claude_auth)
         self.bridge = Bridge(self.db)
         self.sensors = Sensors(self.cfg, self.db, self.claude, self.bridge)
-        self.brief = Brief(self.cfg, self.db, self.claude, lambda: self.me)
+        self.brief = Brief(self.cfg, self.db, self.claude, lambda: self.me, self.bridge)
         self.meetings = Meetings(self.cfg, self.db, self.claude, lambda: self.me)
         self.schedules = Schedules(self.cfg, self.db, self.claude, lambda: self.me)
         self.chat = ChatManager(self)
