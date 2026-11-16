@@ -145,7 +145,11 @@ The **helper** is a small Python service.
 - Each finding is labelled as a request, a commitment, a decision, a blocker or a bit of context.
 - Findings are grouped into **workstreams**: the actual efforts you're juggling, like a migration, a launch or an
   incident.
-- Each workstream keeps a short, honest summary that never claims more than the sources say.
+- Each workstream keeps a short, honest summary that never claims more than the sources say. Everything in it is
+  dated, so something that mattered on one Monday isn't reported as "today" three weeks later.
+- A shared document merely being edited doesn't count as news. A workstream with nothing real in a week goes quiet.
+- Before the brief is written, Daybreak re-checks what it is about to remind you of (the ticket's status, whether you
+  replied to the email) and drops whatever is finished or out of date. Ticking a to-do settles it for good.
 - Connector tools run behind a permission gate that allows reading and nothing else.
 
 The **extension** is plain Manifest V3 with no build step. It draws the new-tab brief, the side panel and the pop-ups.
@@ -238,6 +242,8 @@ Issues and pull requests are welcome, especially from people with workflows unli
   `chrome` API, so you can work on the UI without reloading anything.
 - `python tests/e2e_extension.py` loads the real extension into a throwaway Chromium profile and checks pairing, the
   brief, a pop-up and the side panel.
+- `python tests/test_freshness.py` checks, with a stand-in model, that finished, expired and long-quiet things stay
+  out of the brief.
 - `python docs/make_demo.py` regenerates the screenshots above from made-up data. Please keep real accounts out of
   screenshots and issues.
 

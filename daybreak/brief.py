@@ -10,8 +10,9 @@ from datetime import datetime, timedelta
 import aiohttp
 
 from . import config, prompts
-from .claude import Claude
+from .claude import Claude, SleptThrough
 from .db import DB, new_id
+from .pipeline import QUIET_DAYS, day_label, last_activity, loop_id, loop_line, same_task
 
 log = logging.getLogger("daybreak.brief")
 
@@ -19,6 +20,10 @@ AIC = "https://api.artic.edu/api/v1/artworks/search"
 AIC_HEADERS = {"AIC-User-Agent": "Daybreak personal morning brief (local app)"}
 THEMES = ["landscape", "village", "harbor", "garden", "river", "autumn", "summer", "snow", "seashore", "meadow",
           "mountains", "boats", "farm", "orchard", "city street", "sunrise", "forest", "coast", "picnic", "fields"]
+CARRY_DAYS = 7      # an unfinished to-do is repeated this long at most, unless a re-check finds it still open
+DONE_DAYS = 14      # how far back "you already did this" reaches
+VERIFY_CLAIMS = 12  # how many open loops and carried to-dos are re-checked against their sources before writing
+VERIFY_CALLS = 8
 
 
 async def fetch_painting(db: DB, day: str) -> dict:
@@ -68,27 +73,55 @@ class Brief:
         start = day.replace(hour=0, minute=0, second=0, microsecond=0)
         return start.timestamp(), (start + timedelta(days=1)).timestamp()
 
-    def _workstream_block(self, day_iso: str) -> str:
+    def _mine(self, who: str) -> bool:
+        who, me = str(who).strip().lower(), self.me_fn().lower()
+        return who in ("me", "i", me) or (bool(who) and who == me.split(" ")[0])
+
+    def _surfaced(self, day_iso: str) -> list[dict]:
+        """Workstreams worth showing today: surfaced by the curator and still live (something real in the last few days)."""
         row = self.db.one("SELECT slugs FROM surface WHERE day = ?", (day_iso,)) or \
             self.db.one("SELECT slugs FROM surface ORDER BY day DESC LIMIT 1")
         slugs = json.loads(row["slugs"]) if row else []
-        if not slugs:
-            slugs = [r["slug"] for r in self.db.all(
-                "SELECT slug FROM workstreams WHERE state IN ('active','waiting') AND overview != '' ORDER BY updated DESC LIMIT 6")]
-        blocks = []
-        for slug in slugs:
+        slugs += [r["slug"] for r in self.db.all(
+            "SELECT slug FROM workstreams WHERE state IN ('active','waiting') AND overview != '' ORDER BY updated DESC LIMIT 6")]
+        fresh, out = time.time() - QUIET_DAYS * 86400, []
+        for slug in dict.fromkeys(slugs):
             ws = self.db.one("SELECT * FROM workstreams WHERE slug = ?", (slug,))
-            if not ws:
+            if not ws or ws["state"] not in ("active", "waiting"):
                 continue
-            logs = self.db.all("SELECT text FROM workstream_log WHERE slug = ? ORDER BY ts DESC LIMIT 3", (slug,))
-            loops = json.loads(ws["open_loops"] or "[]")
-            items = self.db.all("SELECT i.ref, i.title, i.state, i.url FROM items i JOIN memberships m ON m.ref = i.ref "
-                                "WHERE m.slug = ? ORDER BY i.updated DESC LIMIT 5", (slug,))
-            blocks.append(f"## {slug} — {ws['title']} · {ws['state']}\n{ws['overview']}\n"
-                          f"Recent: {' | '.join(l['text'] for l in logs) or '-'}\n"
-                          f"Open loops: {json.dumps(loops)[:900]}\n"
-                          "Items: " + "; ".join(f"{i['ref']} '{i['title'][:60]}' ({i['state']}) {i['url']}" for i in items))
-        return "\n\n".join(blocks) or "(no workstreams yet — sources are still being read)"
+            ws["active"] = last_activity(self.db, slug)
+            if ws["active"] < fresh:
+                continue
+            ws["loops"] = json.loads(ws["open_loops"] or "[]")
+            ws["shut"] = json.loads(ws["closed"] or "[]")
+            out.append(ws)
+        return out[:6]
+
+    def _workstream_block(self, surfaced: list[dict], checks: dict, today: datetime) -> str:
+        tz, blocks = self.cfg.tz, []
+        for ws in surfaced:
+            slug = ws["slug"]
+            days = (today.date() - datetime.fromtimestamp(ws["active"], tz).date()).days
+            age = "today" if days <= 0 else "yesterday" if days == 1 else f"{days} days ago"
+            logs = self.db.all("SELECT ts, text FROM workstream_log WHERE slug = ? ORDER BY ts DESC LIMIT 3", (slug,))
+            items = self.db.all("SELECT i.ref, i.title, i.state, i.url, i.updated FROM items i JOIN memberships m "
+                                "ON m.ref = i.ref WHERE m.slug = ? ORDER BY i.updated DESC LIMIT 5", (slug,))
+            loops = []
+            for l in ws["loops"]:
+                check = checks.get(f"L-{loop_id(l.get('text', ''))}")
+                loops.append(f"- [L-{loop_id(l.get('text', ''))}] {loop_line(l)}"
+                             + (f" · re-checked: still open — {check['evidence']}" if check else ""))
+            timeline = " | ".join(f"{day_label(l['ts'], tz)}: {l['text']}" for l in reversed(logs))
+            blocks.append(
+                f"## {slug} — {ws['title']} · {ws['state']} · last activity {day_label(ws['active'], tz)} ({age})\n"
+                f"{ws['overview']}\n"
+                f"Timeline: {timeline or '-'}\n"
+                "Open loops:\n" + ("\n".join(loops) or "(none)") + "\n"
+                "Closed loops: " + ("; ".join(f"{c['text']} — closed {c['on']}: {c.get('why', '')}" for c in ws["shut"])
+                                    or "(none)") + "\n"
+                "Items: " + "; ".join(f"{i['ref']} '{i['title'][:60]}' ({i['state']}, as of {day_label(i['updated'], tz)}) "
+                                      f"{i['url']}" for i in items))
+        return "\n\n".join(blocks) or "(nothing has moved in the last few days — sources may still be being read)"
 
     def schedule(self, day: datetime) -> list[dict]:
         s, e = self._day_bounds(day)
@@ -109,18 +142,101 @@ class Brief:
             return "(calendar not connected — connect Google Calendar in Claude to see meetings here)"
         return "\n".join(lines) or "(no meetings)"
 
-    def _carryover(self, day_iso: str) -> tuple[str, list[dict]]:
+    def _carryover(self, day_iso: str) -> list[dict]:
+        """Unfinished to-dos from the last brief, each with the day it was first raised."""
         prev = self.db.one("SELECT day FROM briefs WHERE day < ? ORDER BY day DESC LIMIT 1", (day_iso,))
         if not prev:
-            return "(none)", []
-        rows = self.db.all("SELECT * FROM todos WHERE day = ? AND done = 0", (prev["day"],))
-        return ("\n".join(f"- {r['text']} ({r['detail']})" for r in rows) or "(all done)"), rows
+            return []
+        rows = self.db.all("SELECT * FROM todos WHERE day = ? AND done = 0 ORDER BY position", (prev["day"],))
+        history = self.db.all("SELECT day, text FROM todos WHERE day < ? ORDER BY day", (prev["day"],))
+        for r in rows:
+            r["cid"] = f"T-{r['id'][:6]}"
+            # To-dos written before `since` was recorded: fall back to the first day the same thing was listed.
+            r["since"] = r["since"] or next((h["day"] for h in history if same_task(h["text"], r["text"])), r["day"])
+        return rows
+
+    def _done(self, day_iso: str, days: int) -> list[dict]:
+        """To-dos the user ticked off recently, newest first, one line per task."""
+        cutoff = (datetime.fromisoformat(day_iso) - timedelta(days=days)).date().isoformat()
+        out: list[dict] = []
+        for r in self.db.all("SELECT text, day FROM todos WHERE done = 1 AND day >= ? ORDER BY day DESC", (cutoff,)):
+            if not any(same_task(r["text"], o["text"]) for o in out):
+                out.append(r)
+        return out[:30]
+
+    async def _verify(self, surfaced: list[dict], carry: list[dict], today: datetime) -> dict:
+        """Re-check open loops owed by the user and carried to-dos against their sources. Returns {claim id: verdict}."""
+        claims = []
+        for ws in surfaced:
+            items = self.db.all("SELECT i.ref, i.title, i.state, i.url FROM items i JOIN memberships m ON m.ref = i.ref "
+                                "WHERE m.slug = ? ORDER BY i.updated DESC LIMIT 4", (ws["slug"],))
+            where = "; ".join(f"{i['ref']} '{i['title'][:50]}' ({i['state']}) {i['url']}" for i in items)
+            for l in ws["loops"]:
+                if self._mine(l.get("who", "")):
+                    claims.append((l.get("since") or "", f"- [L-{loop_id(l.get('text', ''))}] {l.get('text', '')} · workstream "
+                                   f"\"{ws['title']}\" · first recorded {l.get('since') or 'on an unknown date'} · {where}"))
+        for t in carry:
+            url = (json.loads(t["source"] or "{}") or {}).get("url", "")
+            claims.append((t["since"], f"- [{t['cid']}] {t['text']} ({t['detail']}) · a to-do carried from earlier "
+                           f"briefs · first recorded {t['since']} · {url}"))
+        if not claims:
+            return {}
+        claims.sort(key=lambda c: c[0])  # oldest first: those are the likeliest to be stale
+        try:
+            data = await self.claude.complete_json(
+                prompts.fill(prompts.VERIFY_SYSTEM, me=self.me_fn()),
+                prompts.fill(prompts.VERIFY, me=self.me_fn(), now=today.strftime("%A %-d %B %Y, %H:%M"),
+                             claims="\n".join(c[1] for c in claims[:VERIFY_CLAIMS]), budget=VERIFY_CALLS),
+                connectors=True, max_turns=VERIFY_CALLS + 6, fast=True, label="verify", timeout=420)
+        except SleptThrough:
+            raise
+        except Exception as e:
+            log.warning("re-check before the brief failed, writing it unchecked: %s", e)
+            return {}
+        out = {}
+        for c in (data.get("checks") or []) if isinstance(data, dict) else []:
+            if isinstance(c, dict) and c.get("status") in ("done", "expired", "open"):
+                out[str(c.get("id", "")).strip("[] ")] = {"status": c["status"], "evidence": str(c.get("evidence", ""))[:240]}
+        return out
+
+    def _close_loop(self, slug: str, loop: dict, why: str, day_iso: str, todo_id: str = "") -> None:
+        ws = self.db.one("SELECT open_loops, closed FROM workstreams WHERE slug = ?", (slug,))
+        if not ws:
+            return
+        loops = [l for l in json.loads(ws["open_loops"] or "[]") if loop_id(l.get("text", "")) != loop_id(loop["text"])]
+        closed = [c for c in json.loads(ws["closed"] or "[]") if not (todo_id and c.get("todo") == todo_id)]
+        closed.append({"text": loop["text"], "on": day_iso, "why": why, "todo": todo_id,
+                       "loop": loop if loop.get("kind") else None})
+        self.db.x("UPDATE workstreams SET open_loops = ?, closed = ? WHERE slug = ?",
+                  (json.dumps(loops), json.dumps(closed[-12:]), slug))
+
+    def mark_todo(self, todo_id: str, done: bool) -> None:
+        """Tick or un-tick a to-do. Ticking also closes the open loop behind it, so tomorrow's brief can't raise it again."""
+        t = self.db.one("SELECT * FROM todos WHERE id = ?", (todo_id,))
+        if not t:
+            return
+        self.db.x("UPDATE todos SET done = ?, done_at = ? WHERE id = ?", (int(done), time.time() if done else 0, todo_id))
+        ws = self.db.one("SELECT open_loops, closed FROM workstreams WHERE slug = ?", (t["slug"],)) if t["slug"] else None
+        if not ws:
+            return
+        loops, closed = json.loads(ws["open_loops"] or "[]"), json.loads(ws["closed"] or "[]")
+        if done:
+            hit = next((l for l in loops if loop_id(l.get("text", "")) == t["loop"]), None) or \
+                next((l for l in loops if same_task(l.get("text", ""), t["text"])), None)
+            self._close_loop(t["slug"], hit or {"text": t["text"]}, "ticked done", self.cfg.now().date().isoformat(), todo_id)
+        else:
+            for c in [c for c in closed if c.get("todo") == todo_id]:
+                closed.remove(c)
+                if c.get("loop"):
+                    loops.append(c["loop"])
+            self.db.x("UPDATE workstreams SET open_loops = ?, closed = ? WHERE slug = ?",
+                      (json.dumps(loops), json.dumps(closed), t["slug"]))
 
     def _events_block(self) -> str:
         rows = self.db.all("SELECT e.*, i.title FROM events e LEFT JOIN items i ON i.ref = e.ref WHERE e.ts > ? "
                            "AND e.kind != 'context' ORDER BY e.ts DESC LIMIT 30", (time.time() - 86400,))
-        return "\n".join(f"- [{r['kind']}] {r['author']}→{r['target'] or '-'}: {r['text'][:200]} ({r['ref']} {r['url']})"
-                         for r in rows) or "(none)"
+        return "\n".join(f"- [{r['kind']}] {r['author']}→{r['target'] or '-'}: {r['text'][:200]} "
+                         f"({day_label(r['ts'], self.cfg.tz, clock=True)}, {r['ref']} {r['url']})" for r in rows) or "(none)"
 
     def _focus(self, day_iso: str) -> str:
         f = self.db.get("tomorrow_focus") or {}
@@ -135,13 +251,45 @@ class Brief:
         while tomorrow.strftime("%a").lower()[:3] not in self.cfg.brief_days and tomorrow - day < timedelta(days=7):
             tomorrow += timedelta(days=1)
         painting = await fetch_painting(self.db, day_iso)
-        carry_text, _ = self._carryover(day_iso)
+
+        # Re-check what the brief is about to nag about, and settle whatever turned out finished or out of date.
+        surfaced, carry = self._surfaced(day_iso), self._carryover(day_iso)
+        done = self._done(day_iso, DONE_DAYS)
+        carry = [t for t in carry if not any(same_task(t["text"], d["text"]) for d in done)]
+        checks = await self._verify(surfaced, carry, day)
+        settled = []  # found finished or expired this morning
+        for ws in surfaced:
+            for l in list(ws["loops"]):
+                check = checks.get(f"L-{loop_id(l.get('text', ''))}")
+                if check and check["status"] != "open":
+                    why = f"re-checked {check['status']}: {check['evidence']}".rstrip(": ")
+                    self._close_loop(ws["slug"], l, why, day_iso)
+                    ws["loops"].remove(l)
+                    ws["shut"].append({"text": l["text"], "on": day_iso, "why": why})
+                    settled.append(f"{l['text']} ({why})")
+        kept = []
+        for t in carry:
+            check = checks.get(t["cid"]) or {}
+            age = (day.date() - datetime.fromisoformat(t["since"]).date()).days
+            if check.get("status") in ("done", "expired"):
+                settled.append(f"{t['text']} (re-checked {check['status']}: {check['evidence']})")
+            elif age <= CARRY_DAYS or check.get("status") == "open":
+                kept.append(t)
+        open_checks = {k: v for k, v in checks.items() if v["status"] == "open"}
+        carry_text = "\n".join(
+            f"- [{t['cid']}] {t['text']} · open since {day_label(datetime.fromisoformat(t['since']).timestamp(), self.cfg.tz)}"
+            + (f" · re-checked: still open — {open_checks[t['cid']]['evidence']}" if t["cid"] in open_checks
+               else " · not re-checked")
+            + (f" · {t['detail']}" if t["detail"] else "") for t in kept) or "(none)"
+        done_text = "\n".join([f"- {d['text']} (ticked done, {d['day']})" for d in done] + [f"- {x}" for x in settled]) or "(none)"
+
         data = await self.claude.complete_json(
             "You write a concise, grounded morning brief. Output one JSON object only.",
             prompts.fill(prompts.BRIEF, me=self.me_fn(), weekday=day.strftime("%A"), date=day.strftime("%-d %B %Y"),
-                         now=day.strftime("%H:%M"), tz=str(self.cfg.tz), workstreams=self._workstream_block(day_iso),
-                         meetings=self._meetings_block(day), carryover=carry_text, events=self._events_block(),
-                         focus=self._focus(day_iso), tomorrow=tomorrow.strftime("%A %-d %B"),
+                         now=day.strftime("%H:%M"), tz=str(self.cfg.tz),
+                         workstreams=self._workstream_block(surfaced, open_checks, day),
+                         meetings=self._meetings_block(day), carryover=carry_text, done=done_text,
+                         events=self._events_block(), focus=self._focus(day_iso), tomorrow=tomorrow.strftime("%A %-d %B"),
                          tomorrow_meetings=self._meetings_block(tomorrow)),
             label="brief", timeout=600)
         if not isinstance(data, dict):
@@ -152,12 +300,27 @@ class Brief:
                   "data = excluded.data, painting = excluded.painting, created = excluded.created",
                   (day_iso, json.dumps(data), json.dumps(painting), time.time()))
         self.db.x("DELETE FROM todos WHERE day = ? AND done = 0", (day_iso,))
-        for i, t in enumerate(data.get("todos") or []):
-            if isinstance(t, dict) and t.get("text"):
-                self.db.x("INSERT INTO todos(id, day, text, detail, slug, prompt, position, source) VALUES(?,?,?,?,?,?,?,?)",
-                          (new_id(), day_iso, str(t["text"])[:200], str(t.get("detail", ""))[:400],
-                           str(t.get("workstream", ""))[:80], str(t.get("prompt", ""))[:400], i,
-                           json.dumps(t.get("source") or {})[:600]))
+        # Last line of defence: whatever the model wrote, a to-do the user already ticked is never listed again.
+        finished = [d["text"] for d in self._done(day_iso, CARRY_DAYS)] + [x.split(" (re-checked")[0] for x in settled]
+        carried = {t["cid"]: t for t in kept}
+        since_of = {f"L-{loop_id(l.get('text', ''))}": l.get("since") for ws in surfaced for l in ws["loops"]}
+        position = 0
+        for t in data.get("todos") or []:
+            if not isinstance(t, dict) or not t.get("text"):
+                continue
+            text = str(t["text"])[:200]
+            if any(same_task(text, f) for f in finished):
+                log.info("brief: dropped a to-do that is already done: %s", text)
+                continue
+            loop = str(t.get("loop") or "").strip("[] ")
+            origin = carried.get(str(t.get("carry") or "").strip("[] "))
+            since = origin["since"] if origin else since_of.get(loop) or day_iso
+            self.db.x("INSERT INTO todos(id, day, text, detail, slug, prompt, position, source, since, loop) "
+                      "VALUES(?,?,?,?,?,?,?,?,?,?)",
+                      (new_id(), day_iso, text, str(t.get("detail", ""))[:400], str(t.get("workstream", ""))[:80],
+                       str(t.get("prompt", ""))[:400], position, json.dumps(t.get("source") or {})[:600], since,
+                       loop.removeprefix("L-")[:12]))
+            position += 1
         return data
 
     def set_focus(self, day_iso: str, option: dict) -> None:

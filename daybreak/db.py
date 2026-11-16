@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS workstreams (
     title TEXT DEFAULT '',
     overview TEXT DEFAULT '',
     state TEXT DEFAULT 'active',     -- active | waiting | done | dormant
-    open_loops TEXT DEFAULT '[]',    -- JSON list of {kind, who, owes, text}
+    open_loops TEXT DEFAULT '[]',    -- JSON list of {kind, who, to, text, since}
     created REAL NOT NULL,
     updated REAL NOT NULL
 );
@@ -205,7 +205,11 @@ class DB:
         self.conn = sqlite3.connect(str(path or config.DB_PATH), check_same_thread=False, isolation_level=None)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
-        for table, column, decl in (("todos", "source", "TEXT DEFAULT '{}'"),):
+        for table, column, decl in (("todos", "source", "TEXT DEFAULT '{}'"),
+                                    ("todos", "since", "TEXT DEFAULT ''"),      # day it was first raised
+                                    ("todos", "loop", "TEXT DEFAULT ''"),       # id of the open loop it came from
+                                    ("todos", "done_at", "REAL DEFAULT 0"),
+                                    ("workstreams", "closed", "TEXT DEFAULT '[]'")):  # loops settled; not to re-open
             cols = {r[1] for r in self.conn.execute(f"PRAGMA table_info({table})")}
             if column not in cols:
                 self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")

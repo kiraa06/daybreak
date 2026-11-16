@@ -136,6 +136,8 @@ Return {"relevant": false} unless it is about real work — a specific project, 
 deliverable. Generic asks ("what should I do today", "summarize my day"), general knowledge, rewrites and small talk are
 not relevant.
 If relevant, return {"relevant": true, "title": "<3-6 word topic>", "summary": "<one line: what they are trying to do>"}.
+The summary records what {{me}} asked or decided. Never restate the assistant's suggestions, priorities or to-do lists as
+things {{me}} said, planned or committed to.
 
 QUESTION: {{question}}
 ANSWER (may be truncated): {{answer}}"""
@@ -168,30 +170,45 @@ Output STRICT JSONL, one line per (item, workstream) pair and nothing else:
 {"ref": "<item ref verbatim>", "workstream": "<slug>", "conf": 0.9}"""
 
 SYNTHESIS = """\
-You maintain one workstream in {{me}}'s work record. Current time: {{now}}.
+You maintain one workstream in {{me}}'s work record. Current time: {{now}} (today is {{today}}).
 
-PRIOR STATE (title, overview, recent log):
+PRIOR STATE (title, overview, dated log, open and closed loops):
 {{prior}}
 
 MEMBERS (items at their latest state):
 {{members}}
 
-NEW EVENTS since last update ([kind] author→target: summary):
+NEW EVENTS since last update ([kind] author→target: summary (when it happened, ref)):
 {{events}}
 
 Produce:
-- title: 3-6 words, Title Case, human (never the slug). Keep the prior title unless the focus really shifted.
+- title: 3-6 words, Title Case, human (never the slug). Keep the prior title unless the focus really shifted. No
+  "today", "this week" or other words that go out of date.
 - overview: 2-4 sentences a reader can land on cold — what this effort is, who is involved, where it stands, ending on the
-  concrete next step or open question. Carry forward what still holds; drop what is resolved.
+  concrete next step or open question. Carry forward what still holds; drop what is resolved or has passed.
 - update: ONE sentence for the timeline describing the genuinely new development this round, or "" if nothing new beyond
   what the log already says.
 - open_loops: what is still owed — requests waiting on someone and commitments not yet delivered. Each {"kind":
-  "request"|"commitment", "who": "<person who owes it>", "to": "<person it is owed to>", "text": "<short>"} . Use "me" for
-  {{me}}. Drop loops the events show as closed.
+  "request"|"commitment", "who": "<person who owes it>", "to": "<person it is owed to>", "text": "<short>",
+  "since": "<YYYY-MM-DD it was first asked or promised>"}. Use "me" for {{me}}. Keep a prior loop's text and since date
+  unchanged while it is still open.
 - state: "active" (moving), "waiting" (blocked or waiting on others), or "done" (finished/merged/closed).
 
-Ground every statement in the members and events. Do not invent PRs, tickets, reviews, causes or blockers; "in review" is
-not "stalled". When facts are thin, write less.
+Time. This text is read days later, so it must stay true after today:
+- Write dates, never "today", "tomorrow", "this morning", "just now" or "N hours ago": "rostered on-call on Mon 3 Mar",
+  not "on-call today".
+- Something tied to a day or window that has passed (a shift, a deployment window, a meeting, a deadline) is over. Say
+  what happened or drop it; never carry it forward as if it were still coming. Drop loops that only mattered for it.
+- A fact from the prior overview that no event has confirmed in over a week is old: keep it only with its date.
+
+Evidence:
+- "[document edited]" events mean a shared file changed and nothing more. They are not a development: no update line,
+  no new loop, no change of state, and no guess about what the edit means.
+- Events on `chat:` refs record what {{me}} asked their assistant. They are not commitments and never create a loop.
+- Drop a loop when the events show it closed. Never bring back a CLOSED loop unless an event dated after its close date
+  raises it again.
+- Ground every statement in the members and events. Do not invent PRs, tickets, reviews, causes or blockers; "in
+  review" is not "stalled". When facts are thin, write less.
 
 Return ONE JSON object only:
 {"title": "...", "overview": "...", "update": "...", "open_loops": [...], "state": "active"}"""
@@ -199,31 +216,72 @@ Return ONE JSON object only:
 CURATOR = """\
 You curate {{me}}'s live workstreams. Current time: {{now}}.
 
-WORKSTREAMS (slug · members · state · overview):
+WORKSTREAMS (slug · members · state · when something last really happened · overview):
 {{workstreams}}
 
 1) Edges: emit typed relationships that both overviews clearly support. Kinds: depends-on, blocks, follows, supersedes,
    part-of, same-effort, references. Directional (from → to); for same-effort emit one line with the alphabetically
    earlier slug as "from". At most 2 edges per workstream. Strength in [0,1]; do not emit anything below 0.75.
 2) Surface: choose up to {{cap}} workstreams worth putting in front of {{me}} today — actively moving, anchoring related
-   work, or waiting on {{me}}. Skip dormant or trivial one-offs, and only one of any same-effort pair.
+   work, or waiting on {{me}}. Prefer what moved in the last two working days. Skip trivial one-offs, anything whose
+   moment has passed (a shift, window or deadline that is over), workstreams that are only documents being edited, and
+   all but one of any same-effort pair. Fewer is fine.
 
 Output STRICT JSONL only:
 {"kind": "edge", "from": "<slug>", "to": "<slug>", "edge": "depends-on", "strength": 0.85}
 {"kind": "surface", "slugs": ["slug-a", "slug-b"]}   ← exactly one surface line, last."""
 
+VERIFY_SYSTEM = """\
+You are a read-only checker inside Daybreak, a personal work assistant for {{me}}.
+Rules:
+- Use only read-only tools, within the stated call budget. Never send, create, edit or delete anything.
+- If a tool is unavailable or fails, move on. Never retry the same call.
+- Report only what the tools returned. Finish with the JSON object only — no prose, no markdown fences."""
+
+VERIFY = """\
+Before {{me}}'s morning brief is written, re-check whether these things are still true. Current time: {{now}}.
+Each claim is something the brief is about to tell {{me}} they still owe or need to do. Many were recorded days ago and
+may since have been done, answered, overtaken or simply expired.
+
+CLAIMS ([id] claim · where it came from · when it was first recorded · related items):
+{{claims}}
+
+Check with read-only tools — HARD LIMIT of {{budget}} tool calls in total, issued in parallel where independent. Spend
+them on the oldest claims and the ones {{me}} would be most embarrassed to be nagged about:
+- Jira/Confluence: read the issue or page — its status, assignee and latest comments.
+- Gmail: read the thread — did {{me}} reply after the ask, or did someone close it out?
+- Google Drive: read the document only when the claim is about what it says (e.g. who is on a roster for which dates).
+- Calendar: check the date when the claim is about a meeting or shift.
+Skip a claim you cannot check with these tools (e.g. Slack-only). Never send, create or edit anything.
+
+For every claim decide:
+- "done"    — the source shows it finished, answered or handed over.
+- "expired" — it was about a day, shift, window or deadline that has passed, so it no longer needs doing as written. You
+              can decide this from the dates alone, without a tool call.
+- "open"    — you checked and it is still outstanding.
+- "unknown" — you could not check it.
+Never guess "done": without evidence it is "unknown".
+
+Return ONE JSON object only:
+{"checks": [{"id": "<claim id>", "status": "done|expired|open|unknown",
+  "evidence": "<one line with the date, e.g. 'PROJ-142 moved to Review on 4 Mar'; empty for unknown>"}]}"""
+
 BRIEF = """\
 Write {{me}}'s Morning Brief for {{weekday}}, {{date}} (now {{now}}, timezone {{tz}}). It opens their new tab in the
 browser, so it must be scannable in 30 seconds and feel like a sharp chief of staff wrote it.
 
-WORKSTREAMS SURFACED TODAY (title · state · overview · recent log · open loops):
+WORKSTREAMS SURFACED TODAY (each with when something last really happened, a dated timeline, open loops with the date
+they opened and the result of this morning's re-check where one was made, and loops already closed):
 {{workstreams}}
 
 TODAY'S MEETINGS:
 {{meetings}}
 
-UNFINISHED TO-DOS FROM THE LAST BRIEF:
+TO-DOS STILL OPEN FROM THE LAST BRIEF ([id] text · first raised · re-check result if any):
 {{carryover}}
+
+ALREADY DONE — {{me}} ticked these off, or this morning's re-check found them finished or expired:
+{{done}}
 
 WHAT {{me}} SAID YESTERDAY THEY WANTED TO WORK ON TODAY:
 {{focus}}
@@ -234,24 +292,37 @@ TOMORROW'S MEETINGS ({{tomorrow}}):
 RECENT NOTABLE EVENTS (last 24h, with source refs and links):
 {{events}}
 
+What earns a place. {{me}} reads this every morning, so a line that was there yesterday and has not changed is noise:
+- Lead with what is new since the last brief or due today. Everything is dated; compare those dates with today.
+- Never present something from an earlier day as happening today. A shift, window, meeting or deadline dated before
+  today is over: leave it out, or say once what became of it. "Rostered on-call on Mon 3 Mar" is not "on-call today".
+- Never raise, in any section or wording, anything under ALREADY DONE or in a workstream's closed loops.
+- A loop or to-do marked "re-checked: still open" is confirmed — say so plainly. One older than three days that was not
+  re-checked is unconfirmed: include it only if it still clearly matters, and say when it was last seen ("asked on
+  Tue 4 Mar, no reply seen since") rather than asserting that someone is still waiting.
+- Carry a to-do forward only if it is still true and still worth doing today; put its id in "carry". Dropping a stale
+  one is better than repeating it.
+- push_forward needs evidence from the last two working days or a loop re-checked as still open.
+
 Write in second person ("you"), warm and direct, like a sharp colleague who has read everything. Name real people and
 artifacts. Return ONE JSON object:
 {
  "caption": "<one witty, warm sentence (max 22 words) about the shape of the day — its rhythm, its main event, or how to
    approach it, e.g. 'Your morning was back-to-backs, but the afternoon opens up after a 1:30 brainstorm.'>",
- "push_forward": [  // 1-2 items: the single most valuable move(s) today, highest leverage first
+ "push_forward": [  // 0-2 items: the single most valuable move(s) today, highest leverage first
    {"headline": "<imperative, specific, max 14 words>", "body": "<2-3 sentences with the concrete specifics: names,
      numbers, ticket keys, deadlines — why now and what 'done' looks like>", "workstream": "<slug>",
      "prompt": "<what they would ask the assistant to start on it, first person>"}],
- "todos": [  // 3-6 concrete to-dos, mostly open loops owed BY {{me}} plus still-relevant carryover
-   {"text": "<short imperative, may name the person>", "detail": "<one sentence of context: who's waiting, why it matters>",
-    "workstream": "<slug or empty>", "source": {"label": "<e.g. 'Open PROJ-142' or 'Open thread in #team-releases'>",
-    "url": "<link from the input or empty>"},
+ "todos": [  // 0-6 concrete to-dos: open loops owed BY {{me}}, plus carried to-dos that are still true
+   {"text": "<short imperative, may name the person>", "detail": "<one sentence of context: who's waiting, since when,
+    why it matters>", "workstream": "<slug or empty>", "loop": "<id of the open loop it comes from, or empty>",
+    "carry": "<id of the carried to-do it continues, or empty>",
+    "source": {"label": "<e.g. 'Open PROJ-142' or 'Open thread in #team-releases'>", "url": "<link from the input or empty>"},
     "prompt": "<first-person ask to help do it, e.g. 'Draft a reply to Priya about the rollout date'>"}],
- "updates": [  // one per surfaced workstream that moved, most important first (max 5)
+ "updates": [  // one per surfaced workstream that moved since the last brief, most important first (max 5)
    {"workstream": "<slug>", "title": "<workstream title>",
     "tag": "Active|Awaiting reply|Blocked|Needs you|Done",
-    "text": "<2-4 sentence narrative: what happened, who said what, where it stands, what you should do or prepare>",
+    "text": "<2-4 sentence narrative: what happened and when, who said what, where it stands, what you should do or prepare>",
     "source": {"label": "<e.g. 'Open PROJ-142' / 'Open thread in #channel' / 'Open email from Priya'>", "url": "<link or empty>"},
     "people": ["<names involved>"]}],
  "your_day": {

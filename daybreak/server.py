@@ -111,7 +111,7 @@ def make_app(app: App) -> web.Application:
     @routes.post("/api/todos/{id}")
     async def todo(r):
         body = await r.json()
-        app.db.x("UPDATE todos SET done = ? WHERE id = ?", (1 if body.get("done") else 0, r.match_info["id"]))
+        app.brief.mark_todo(r.match_info["id"], bool(body.get("done")))
         return ok(ok=True)
 
     @routes.get("/api/meetings")

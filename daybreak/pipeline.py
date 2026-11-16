@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
 import time
 from collections import defaultdict
+from datetime import datetime
 
 from . import prompts
 from .claude import Claude
@@ -19,15 +21,57 @@ ROUTE_FLOOR = 0.75
 SURFACE_CAP = 6
 SYNTH_PER_CYCLE = 10
 SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+DORMANT_DAYS = 7   # nothing real for this long: the workstream drops out of routing
+QUIET_DAYS = 5     # nothing real for this long: not worth putting in front of the user (covers a long weekend)
+CLOSED_KEEP_DAYS = 21
+# A shared document merely being edited says nothing about the work. It can sit in a workstream, but it is not news.
+AMBIENT = "(e.source = 'drive' AND e.kind = 'context')"
+_FILLER = {"the", "a", "an", "to", "for", "of", "on", "in", "with", "and", "your", "you", "about", "from", "at", "is",
+           "it", "this", "that", "status", "still", "today", "now"}
 
 
-def _ago(ts: float) -> str:
-    mins = int((time.time() - ts) / 60)
-    if mins < 60:
-        return f"{mins}m ago"
-    if mins < 1440:
-        return f"{mins // 60}h ago"
-    return f"{mins // 1440}d ago"
+def day_label(ts: float, tz, clock: bool = False) -> str:
+    """'Mon 3 Mar' (or with the time). Everything the model reads is dated, so "today" can't outlive its day."""
+    return datetime.fromtimestamp(ts, tz).strftime("%a %-d %b %H:%M" if clock else "%a %-d %b")
+
+
+def day_iso(ts: float, tz) -> str:
+    return datetime.fromtimestamp(ts, tz).date().isoformat()
+
+
+def last_activity(db: DB, slug: str) -> float:
+    """When something last really happened in a workstream (see AMBIENT for what doesn't count)."""
+    row = db.one(f"SELECT MAX(MIN(e.ts, e.created)) AS t FROM events e JOIN memberships m ON m.ref = e.ref "
+                 f"WHERE m.slug = ? AND NOT {AMBIENT}", (slug,))
+    if row and row["t"]:
+        return row["t"]
+    ws = db.one("SELECT created FROM workstreams WHERE slug = ?", (slug,))
+    return ws["created"] if ws else 0
+
+
+def _words(text: str) -> set[str]:
+    words = (w for w in re.findall(r"[a-z0-9]+", text.lower()) if w not in _FILLER and len(w) > 1)
+    return {w[:-1] if len(w) > 3 and w.endswith("s") else w for w in words}  # "reservations" and "reservation" match
+
+
+def loop_id(text: str) -> str:
+    """Short stable id for an open loop, so a to-do can point back at the loop it came from."""
+    return hashlib.sha1(" ".join(sorted(_words(text))).encode()).hexdigest()[:6]
+
+
+def same_task(a: str, b: str) -> bool:
+    """Whether two short task descriptions are the same thing worded differently."""
+    x, y = _words(a), _words(b)
+    if not x or not y:
+        return False
+    common = len(x & y)
+    return common / len(x | y) >= 0.6 or (min(len(x), len(y)) >= 3 and common / min(len(x), len(y)) >= 0.8)
+
+
+def loop_line(loop: dict) -> str:
+    return (f"{loop.get('kind', 'request')}: {loop.get('who', '?')} owes {loop.get('to', '?')}: {loop.get('text', '')} "
+            f"(open since {loop.get('since') or 'an unknown date'})")
 
 
 class Pipeline:
@@ -137,20 +181,29 @@ class Pipeline:
         events = self.db.all(
             "SELECT * FROM events WHERE ref IN (%s) AND created > ? ORDER BY ts LIMIT 60" % ",".join("?" * len(refs)),
             refs + [ws["updated"]])
-        if not events and ws["updated"]:
-            return False
+        ambient = lambda e: e["source"] == "drive" and e["kind"] == "context"  # noqa: E731
+        if ws["updated"] and all(ambient(e) for e in events):
+            return False  # nothing but documents being edited (or nothing at all)
+        tz, now = self.cfg.tz, time.time()
+        today = self.cfg.now().date().isoformat()
+        prior_loops = json.loads(ws["open_loops"] or "[]")
+        closed = [c for c in json.loads(ws.get("closed") or "[]") if c.get("on", "") >= day_iso(now - CLOSED_KEEP_DAYS * 86400, tz)]
         log_rows = self.db.all("SELECT ts, text FROM workstream_log WHERE slug = ? ORDER BY ts DESC LIMIT 6", (slug,))
         prior = ("(new workstream)" if not ws["updated"] else
-                 f"TITLE: {ws['title']}\nOVERVIEW: {ws['overview']}\nLOG:\n" +
-                 "\n".join(f"- {_ago(r['ts'])}: {r['text']}" for r in reversed(log_rows)))
+                 f"TITLE: {ws['title']}\nOVERVIEW (written {day_label(ws['updated'], tz)}): {ws['overview']}\nLOG:\n" +
+                 "\n".join(f"- {day_label(r['ts'], tz)}: {r['text']}" for r in reversed(log_rows)) +
+                 "\nOPEN LOOPS:\n" + ("\n".join(f"- {loop_line(l)}" for l in prior_loops) or "(none)") +
+                 "\nCLOSED LOOPS:\n" + ("\n".join(f"- {c['text']} — closed {c['on']}: {c.get('why', '')}" for c in closed)
+                                        or "(none)"))
         member_lines = "\n".join(f"- {m['ref']} · {m['title'][:90]} · {m['state']} · {m['url']}" for m in members)
-        event_lines = "\n".join(f"- [{e['kind']}] {e['author']}→{e['target'] or '-'}: {e['text']} ({_ago(e['ts'])}, {e['ref']})"
-                                for e in events) or "(no new events)"
+        event_lines = "\n".join(
+            f"- [{'document edited' if ambient(e) else e['kind']}] {e['author']}→{e['target'] or '-'}: {e['text']} "
+            f"({day_label(min(e['ts'], e['created']), tz, clock=True)}, {e['ref']})" for e in events) or "(no new events)"
         try:
             out = await self.claude.complete_json(
                 "You maintain one workstream summary. Output one JSON object only.",
-                prompts.fill(prompts.SYNTHESIS, me=self.me, now=self.cfg.now().isoformat(timespec="minutes"),
-                             prior=prior, members=member_lines, events=event_lines),
+                prompts.fill(prompts.SYNTHESIS, me=self.me, now=self.cfg.now().strftime("%A %-d %B %Y, %H:%M"),
+                             today=today, prior=prior, members=member_lines, events=event_lines),
                 label=f"synth:{slug}")
         except Exception as e:
             log.warning("synthesis %s failed: %s", slug, e)
@@ -159,9 +212,21 @@ class Pipeline:
             return False
         now = time.time()
         state = out.get("state") if out.get("state") in ("active", "waiting", "done") else "active"
-        self.db.x("UPDATE workstreams SET title = ?, overview = ?, state = ?, open_loops = ?, updated = ? WHERE slug = ?",
+        known = {loop_id(l.get("text", "")): l for l in prior_loops}
+        loops = []
+        for l in out.get("open_loops") or []:
+            if not isinstance(l, dict) or not str(l.get("text", "")).strip():
+                continue
+            text = str(l["text"]).strip()[:300]
+            since = str(l.get("since") or "")[:10]
+            if not DATE_RE.match(since) or since > today:  # a loop keeps its date; a brand-new one starts today
+                since = known[loop_id(text)].get("since", "") if loop_id(text) in known else today
+            loops.append({"kind": str(l.get("kind", "request"))[:20], "who": str(l.get("who", ""))[:80],
+                          "to": str(l.get("to", ""))[:80], "text": text, "since": since})
+        self.db.x("UPDATE workstreams SET title = ?, overview = ?, state = ?, open_loops = ?, closed = ?, updated = ? "
+                  "WHERE slug = ?",
                   (str(out.get("title") or ws["title"] or slug)[:120], str(out.get("overview", ""))[:1500], state,
-                   json.dumps(out.get("open_loops") or [])[:6000], now, slug))
+                   json.dumps(loops[:12]), json.dumps(closed), now, slug))
         update = str(out.get("update", "")).strip()
         if update:
             self.db.x("INSERT INTO workstream_log(slug, ts, text) VALUES(?,?,?)", (slug, now, update[:500]))
@@ -173,13 +238,18 @@ class Pipeline:
             "SELECT w.slug, w.state, w.overview, COUNT(m.ref) AS n FROM workstreams w "
             "LEFT JOIN memberships m ON m.slug = w.slug WHERE w.state IN ('active', 'waiting') AND w.overview != '' "
             "GROUP BY w.slug ORDER BY w.updated DESC LIMIT 40")
+        fresh = time.time() - QUIET_DAYS * 86400
+        for r in rows:
+            r["active"] = last_activity(self.db, r["slug"])
+        rows = [r for r in rows if r["active"] >= fresh]
         if not rows:
             return []
-        lines = "\n".join(f"- {r['slug']} · {r['n']} · {r['state']} · {r['overview'][:260]}" for r in rows)
+        lines = "\n".join(f"- {r['slug']} · {r['n']} · {r['state']} · last activity {day_label(r['active'], self.cfg.tz)} · "
+                          f"{r['overview'][:260]}" for r in rows)
         try:
             directives = await self.claude.complete_json(
                 "You curate a workstream graph. Output JSONL only.",
-                prompts.fill(prompts.CURATOR, me=self.me, now=self.cfg.now().isoformat(timespec="minutes"),
+                prompts.fill(prompts.CURATOR, me=self.me, now=self.cfg.now().strftime("%A %-d %B %Y, %H:%M"),
                              workstreams=lines, cap=SURFACE_CAP),
                 jsonl=True, fast=True, label="curate")
         except Exception as e:
@@ -211,19 +281,21 @@ class Pipeline:
     # -- one cycle -------------------------------------------------------------
     async def run(self) -> dict:
         touched = await self.route()
-        # Workstreams whose members received events after their last synthesis also need a refresh.
+        # Refresh every workstream whose members have real news since its last synthesis, oldest wait first.
         stale = self.db.all(
-            "SELECT DISTINCT m.slug FROM memberships m JOIN events e ON e.ref = m.ref "
-            "JOIN workstreams w ON w.slug = m.slug WHERE e.created > w.updated")
-        touched |= {r["slug"] for r in stale}
-        targets = sorted(touched)[:SYNTH_PER_CYCLE]
+            "SELECT m.slug, MIN(e.created) AS first FROM memberships m JOIN events e ON e.ref = m.ref "
+            f"JOIN workstreams w ON w.slug = m.slug WHERE e.created > w.updated AND (w.updated = 0 OR NOT {AMBIENT}) "
+            "GROUP BY m.slug ORDER BY first")
+        targets = [r["slug"] for r in stale][:SYNTH_PER_CYCLE]
         results = await asyncio.gather(*(self.synthesize(s) for s in targets))
         changed = sum(1 for r in results if r)
+        # Quiet workstreams fade out of routing after a week without anything real happening in them.
+        cutoff = time.time() - DORMANT_DAYS * 86400
+        for w in self.db.all("SELECT slug FROM workstreams WHERE state != 'dormant' AND updated > 0"):
+            if last_activity(self.db, w["slug"]) < cutoff:
+                self.db.x("UPDATE workstreams SET state = 'dormant' WHERE slug = ?", (w["slug"],))
         day = self.cfg.now().date().isoformat()
         surface = []
         if changed or not self.db.one("SELECT 1 FROM surface WHERE day = ?", (day,)):
             surface = await self.curate()
-        # Quiet workstreams fade out of routing after a week.
-        self.db.x("UPDATE workstreams SET state = 'dormant' WHERE state != 'dormant' AND updated > 0 AND updated < ?",
-                  (time.time() - 7 * 86400,))
         return {"routed_to": len(touched), "synthesized": changed, "surface": surface}
